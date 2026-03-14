@@ -20,10 +20,18 @@ export const Route = createRootRoute({
       },
       {
         name: 'description',
-        content: 'Phase 1 foundation for a BTC/USDT trading bot with strategy and AI tooling.',
+        content: 'A premium trading bot dashboard concept for strategy, onboarding, and AI guidance.',
       },
     ],
-    links: [{ rel: 'stylesheet', href: appCss }],
+    links: [
+      { rel: 'preconnect', href: 'https://fonts.googleapis.com' },
+      { rel: 'preconnect', href: 'https://fonts.gstatic.com', crossOrigin: 'anonymous' },
+      {
+        rel: 'stylesheet',
+        href: 'https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&family=Sora:wght@400;600;700;800&display=swap',
+      },
+      { rel: 'stylesheet', href: appCss },
+    ],
   }),
   component: RootComponent,
 })
@@ -32,12 +40,15 @@ function RootComponent() {
   return (
     <RootDocument>
       <div className="app-shell">
-        <aside className="sidebar">
+        <div className="ambient ambient-a" />
+        <div className="ambient ambient-b" />
+        <div className="ambient ambient-c" />
+        <header className="topbar">
           <div className="brand">
             <span className="brand-mark">O</span>
             <div>
-              <p className="eyebrow">Oscar</p>
-              <h1>Trading Bot</h1>
+              <p className="eyebrow">Oscar Trading Bot</p>
+              <h1>Mobile-first exchange concept</h1>
             </div>
           </div>
           <nav className="nav">
@@ -54,15 +65,18 @@ function RootComponent() {
               AI Workspace
             </Link>
           </nav>
-          <div className="sidebar-card">
-            <p className="eyebrow">Phase 1</p>
-            <strong>Architecture + prototypes</strong>
-            <p>Backend and frontend foundations are ready for live API and execution work.</p>
+          <div className="status-pill">
+            <span className="status-dot" aria-hidden="true" />
+            Soft launch aesthetic
           </div>
-        </aside>
+        </header>
         <main className="main-content">
           <Outlet />
         </main>
+        <div className="bottom-note">
+          <p className="eyebrow">Reference direction</p>
+          <strong>Glossy trading cards, pastel lighting, and stacked mobile layouts.</strong>
+        </div>
       </div>
       <TanStackRouterDevtools position="bottom-right" />
     </RootDocument>
@@ -75,11 +89,10 @@ function RootDocument({ children }: Readonly<{ children: ReactNode }>) {
       <head>
         <HeadContent />
       </head>
-      <body>
+      <body className="app-body">
         {children}
         <Scripts />
       </body>
     </html>
   )
 }
-

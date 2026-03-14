@@ -1,11 +1,19 @@
 import { createFileRoute } from '@tanstack/react-router'
+import { MarketPhone, StatsPhone, SwapPhone } from '../components/showcase'
 
-const focusItems = [
-  'Project structure and environment config',
-  'Exchange abstraction with mock and CCXT clients',
-  'Strategy prototypes for grid, rebalance, and infinity grid',
-  'CLI status and demo commands',
-  'TanStack Start web shell for future dashboard work',
+const featureCards = [
+  {
+    title: 'Market surfaces',
+    body: 'Overview, wallet, swap, and stat states are styled as collectible mobile screens instead of flat admin panels.',
+  },
+  {
+    title: 'Soft-risk framing',
+    body: 'The UI keeps premium polish while still hinting at the safety rails that matter for a live trading product.',
+  },
+  {
+    title: 'Route continuity',
+    body: 'Every route now feels like part of one trading ecosystem rather than a placeholder set of disconnected cards.',
+  },
 ]
 
 export const Route = createFileRoute('/')({
@@ -15,40 +23,46 @@ export const Route = createFileRoute('/')({
 function OverviewPage() {
   return (
     <div className="page">
-      <section className="hero">
-        <div>
-          <p className="eyebrow">MVP foundation</p>
-          <h2>Bitcoin automation, built to be tested before it trades.</h2>
+      <section className="showcase-grid">
+        <div className="showcase-copy">
+          <p className="eyebrow">Overview</p>
+          <h2>Trading bot software, reframed like a premium mobile exchange launch.</h2>
           <p className="lede">
-            This phase sets up the backend architecture, strategy prototypes, and frontend shell so
-            the next steps can focus on execution, risk controls, and live data.
+            The redesign takes the existing Oscar routes and gives them the soft, luminous trading
+            aesthetic from the reference: floating phone canvases, bright white glass, and calm
+            violet accents that make the product feel collectible instead of utilitarian.
           </p>
+          <div className="metric-band">
+            <div className="metric-tile">
+              <span>Primary pair</span>
+              <strong>BTC / SOL / USDC</strong>
+            </div>
+            <div className="metric-tile">
+              <span>Visual mode</span>
+              <strong>Pastel glass UI</strong>
+            </div>
+            <div className="metric-tile">
+              <span>Readiness</span>
+              <strong>Prototype frontends live</strong>
+            </div>
+          </div>
         </div>
-        <div className="hero-metrics">
-          <div className="metric">
-            <span>Primary pair</span>
-            <strong>BTC/USDT</strong>
-          </div>
-          <div className="metric">
-            <span>Strategies</span>
-            <strong>3 prototype flows</strong>
-          </div>
-          <div className="metric">
-            <span>Frontend</span>
-            <strong>TanStack Start</strong>
-          </div>
+        <div className="phone-wall overview-wall" aria-label="Mobile trading dashboard showcase">
+          <MarketPhone />
+          <StatsPhone />
+          <SwapPhone />
         </div>
       </section>
 
-      <section className="card-grid">
-        {focusItems.map((item) => (
-          <article className="card" key={item}>
-            <p className="eyebrow">Delivered</p>
-            <h3>{item}</h3>
+      <section className="feature-grid">
+        {featureCards.map((item) => (
+          <article className="feature-card" key={item.title}>
+            <p className="eyebrow">Design shift</p>
+            <h3>{item.title}</h3>
+            <p>{item.body}</p>
           </article>
         ))}
       </section>
     </div>
   )
 }
-

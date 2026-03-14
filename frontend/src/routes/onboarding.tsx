@@ -1,4 +1,5 @@
 import { createFileRoute } from '@tanstack/react-router'
+import { SetupPhone, SwapPhone } from '../components/showcase'
 
 const steps = [
   'Connect exchange credentials from a local environment file',
@@ -13,14 +14,25 @@ export const Route = createFileRoute('/onboarding')({
 function OnboardingPage() {
   return (
     <div className="page">
-      <section className="section-heading">
-        <p className="eyebrow">Onboarding flow</p>
-        <h2>Guided setup will keep live trading behind explicit safety checks.</h2>
+      <section className="showcase-grid showcase-grid-tight">
+        <div className="showcase-copy">
+          <p className="eyebrow">Onboarding</p>
+          <h2>Safety steps are now part of the product story, not hidden in a dry checklist.</h2>
+          <p className="lede">
+            The onboarding route uses the same luminous visual system, but shifts the emphasis to
+            protected setup, simulation-first decisions, and clear risk approvals before any live
+            trading begins.
+          </p>
+        </div>
+        <div className="phone-wall onboarding-wall" aria-label="Onboarding preview screens">
+          <SetupPhone />
+          <SwapPhone />
+        </div>
       </section>
 
-      <div className="card-grid">
+      <div className="feature-grid">
         {steps.map((step, index) => (
-          <article className="card" key={step}>
+          <article className="feature-card" key={step}>
             <p className="eyebrow">Step {index + 1}</p>
             <h3>{step}</h3>
           </article>
@@ -29,4 +41,3 @@ function OnboardingPage() {
     </div>
   )
 }
-
