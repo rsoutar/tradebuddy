@@ -28,6 +28,7 @@ source .venv/bin/activate
 pip install -e ".[dev]"
 trading-bot status
 trading-bot demo-strategy grid
+trading-bot serve-api --reload
 pytest
 
 # Install live exchange dependencies when you are ready to wire CCXT
@@ -55,8 +56,11 @@ On first run, TanStack Start generates `src/routeTree.gen.ts`.
 
 - Project structure and local environment configuration
 - Backend settings, logging, domain models, and service boundaries
+- BTCUSDT-only spot-market configuration for the MVP
 - Exchange integration abstraction with mock and CCXT-backed clients
+- Binance spot WebSocket market data feed with REST fallback
 - Strategy evaluation prototypes with tests
+- FastAPI dashboard endpoints for status, strategy previews, paper runs, and backtests
 - TanStack Start dashboard, onboarding, bot, and AI routes
 
 ## Next Steps

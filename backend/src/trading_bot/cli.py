@@ -6,6 +6,7 @@ from dataclasses import asdict
 
 from trading_bot.app import create_app
 from trading_bot.models import StrategyType
+from trading_bot.settings import load_settings
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -20,21 +21,46 @@ def build_parser() -> argparse.ArgumentParser:
         choices=[strategy.value for strategy in StrategyType],
         help="Strategy prototype to evaluate",
     )
+
+    api_parser = subparsers.add_parser("serve-api", help="Run the dashboard API server")
+    api_parser.add_argument("--host", help="Host interface to bind")
+    api_parser.add_argument("--port", type=int, help="Port to bind")
+    api_parser.add_argument(
+        "--reload",
+        action="store_true",
+        help="Enable auto-reload for local development",
+    )
     return parser
 
 
 def main() -> None:
     parser = build_parser()
     args = parser.parse_args()
-    app = create_app()
 
     if args.command == "status":
+        app = create_app()
         print(json.dumps(asdict(app.status()), indent=2))
         return
 
     if args.command == "demo-strategy":
+        app = create_app()
         strategy = StrategyType(args.strategy)
         print(json.dumps(app.demo_strategy(strategy), indent=2))
+        return
+
+    if args.command == "serve-api":
+        settings = load_settings()
+        try:
+            import uvicorn
+        except ImportError as exc:  # pragma: no cover
+            raise RuntimeError("Install fastapi/uvicorn dependencies to run the API server.") from exc
+
+        uvicorn.run(
+            "trading_bot.api:app",
+            host=args.host or settings.api.host,
+            port=args.port or settings.api.port,
+            reload=args.reload,
+        )
         return
 
     parser.error(f"Unknown command: {args.command}")
@@ -42,4 +68,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-

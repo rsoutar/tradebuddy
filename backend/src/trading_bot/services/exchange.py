@@ -61,6 +61,7 @@ class CcxtExchangeClient:
                 "apiKey": self._settings.api_key,
                 "secret": self._settings.api_secret,
                 "enableRateLimit": True,
+                "options": {"defaultType": self._settings.market_type},
             }
         )
         if self._settings.sandbox and hasattr(self._client, "set_sandbox_mode"):
@@ -94,4 +95,3 @@ class CcxtExchangeClient:
                     )
                 )
         return balances
-
