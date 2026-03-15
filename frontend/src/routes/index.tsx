@@ -1,6 +1,4 @@
-import { useState } from 'react'
 import { Link, createFileRoute } from '@tanstack/react-router'
-import { beginLineLogin } from '../lib/session'
 import { Route as RootRoute } from './__root'
 
 const launchStats = [
@@ -34,32 +32,10 @@ export const Route = createFileRoute('/')({
 function HomePage() {
   const viewer = RootRoute.useLoaderData()
   const search = Route.useSearch()
-  const [isStartingLogin, setIsStartingLogin] = useState(false)
-  const [localError, setLocalError] = useState<string>()
-  const authError = search.authError || localError
+  const authError = search.authError
   const heroCopy = viewer.authenticated
     ? `Welcome back, ${viewer.user?.displayName}. Your dashboard is ready with paper trading controls and the latest bot health snapshot.`
     : 'Sign in with LINE to unlock the trading dashboard, launch paper trading, and run backtests with the latest bot metrics.'
-
-  async function handleLineLogin() {
-    try {
-      setIsStartingLogin(true)
-      setLocalError(undefined)
-      const result = await beginLineLogin({ data: { intendedPath: '/dashboard' } })
-
-      if (result.mode === 'oauth') {
-        window.location.assign(result.authorizeUrl)
-        return
-      }
-
-      window.location.assign(result.redirectTo)
-    } catch (error) {
-      setLocalError(
-        error instanceof Error ? error.message : 'Unable to start LINE Login right now.',
-      )
-      setIsStartingLogin(false)
-    }
-  }
 
   return (
     <div className="page">
@@ -81,16 +57,12 @@ function HomePage() {
                 Open dashboard
               </Link>
             ) : (
-              <button
-                type="button"
+              <Link
                 className="primary-button"
-                onClick={() => {
-                  void handleLineLogin()
-                }}
-                disabled={isStartingLogin}
+                to="/auth/line/start"
               >
-                {isStartingLogin ? 'Connecting to LINE...' : 'Continue with LINE'}
-              </button>
+                Continue with LINE
+              </Link>
             )}
             <Link className="secondary-link" to="/onboarding">
               Review setup steps

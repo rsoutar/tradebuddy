@@ -146,7 +146,10 @@ const timeFormatter = new Intl.DateTimeFormat('en', {
 })
 
 function getSessionPassword() {
-  return process.env.AUTH_SESSION_SECRET ?? 'oscar-dev-session-secret-change-me'
+  return (
+    process.env.AUTH_SESSION_SECRET ??
+    'oscar-dev-session-secret-change-me-1234567890'
+  )
 }
 
 function getSessionConfig() {
