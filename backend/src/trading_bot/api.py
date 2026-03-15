@@ -2,17 +2,26 @@ from __future__ import annotations
 
 from dataclasses import asdict
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Query
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import RedirectResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from trading_bot.app import TradingBotApp, create_app
 from trading_bot.models import StrategyType
 
 
-class StrategyActionRequest(BaseModel):
+class UserScopedRequest(BaseModel):
+    user_id: str = "demo-user"
+    user_name: str = "Demo Trader"
+
+
+class StrategyActionRequest(UserScopedRequest):
     strategy: StrategyType
+
+
+class DepositRequest(UserScopedRequest):
+    amount_usd: float = Field(gt=0)
 
 
 def create_api(trading_app: TradingBotApp | None = None) -> FastAPI:
@@ -47,8 +56,11 @@ def create_api(trading_app: TradingBotApp | None = None) -> FastAPI:
         return asdict(app_state.status())
 
     @api.get("/api/dashboard")
-    def get_dashboard() -> dict:
-        return app_state.dashboard()
+    def get_dashboard(
+        user_id: str = Query(default="demo-user"),
+        user_name: str = Query(default="Demo Trader"),
+    ) -> dict:
+        return app_state.dashboard(user_id=user_id, user_name=user_name)
 
     @api.get("/api/strategies/{strategy}")
     def get_strategy_preview(strategy: StrategyType) -> dict:
@@ -56,11 +68,27 @@ def create_api(trading_app: TradingBotApp | None = None) -> FastAPI:
 
     @api.post("/api/paper-trading/run")
     def run_paper_trading(payload: StrategyActionRequest) -> dict:
-        return app_state.run_paper_trading(payload.strategy)
+        return app_state.run_paper_trading(
+            payload.strategy,
+            user_id=payload.user_id,
+            user_name=payload.user_name,
+        )
 
     @api.post("/api/backtests/run")
     def run_backtest(payload: StrategyActionRequest) -> dict:
-        return app_state.run_backtest(payload.strategy)
+        return app_state.run_backtest(
+            payload.strategy,
+            user_id=payload.user_id,
+            user_name=payload.user_name,
+        )
+
+    @api.post("/api/paper-trading/deposits")
+    def deposit_paper_funds(payload: DepositRequest) -> dict:
+        return app_state.deposit_paper_funds(
+            payload.amount_usd,
+            user_id=payload.user_id,
+            user_name=payload.user_name,
+        )
 
     return api
 

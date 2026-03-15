@@ -64,7 +64,6 @@ type SessionData = {
   oauthState?: string
   pkceVerifier?: string
   intendedPath?: string
-  dashboard?: DashboardState
 }
 
 export type ViewerState = {
@@ -77,73 +76,7 @@ type LoginResult =
   | { mode: 'oauth'; authorizeUrl: string }
   | { mode: 'demo'; redirectTo: string }
 
-const strategyCatalog: Array<{
-  key: StrategyKey
-  name: string
-  summary: string
-  mode: BotMetric['mode']
-  status: BotMetric['status']
-  paperPnlPct: number
-  winRatePct: number
-  maxDrawdownPct: number
-  sharpeRatio: number
-  trades: number
-  allocationPct: number
-  lastSignal: string
-}> = [
-  {
-    key: 'grid',
-    name: 'Grid Bot',
-    summary: 'Captures intraday BTC rotations inside a protected paper ladder.',
-    mode: 'Sideways',
-    status: 'paper-running',
-    paperPnlPct: 4.82,
-    winRatePct: 67.4,
-    maxDrawdownPct: 3.1,
-    sharpeRatio: 1.41,
-    trades: 36,
-    allocationPct: 32,
-    lastSignal: 'Buy wall refreshed at $81,420',
-  },
-  {
-    key: 'rebalance',
-    name: 'Rebalance Bot',
-    summary: 'Keeps BTC and cash near the target ratio with low intervention.',
-    mode: 'Steady',
-    status: 'idle',
-    paperPnlPct: 2.18,
-    winRatePct: 58.3,
-    maxDrawdownPct: 1.7,
-    sharpeRatio: 1.12,
-    trades: 11,
-    allocationPct: 28,
-    lastSignal: 'Portfolio drift hit 4.8% threshold',
-  },
-  {
-    key: 'infinity-grid',
-    name: 'Infinity Grid',
-    summary: 'Extends with trend strength while keeping trailing protection active.',
-    mode: 'Trend',
-    status: 'backtest-ready',
-    paperPnlPct: 6.41,
-    winRatePct: 72.1,
-    maxDrawdownPct: 4.4,
-    sharpeRatio: 1.67,
-    trades: 24,
-    allocationPct: 40,
-    lastSignal: 'Trailing take-profit armed at +1.2%',
-  },
-]
-
 const lineScopes = ['openid', 'profile']
-const dayFormatter = new Intl.DateTimeFormat('en', {
-  month: 'short',
-  day: 'numeric',
-})
-const timeFormatter = new Intl.DateTimeFormat('en', {
-  hour: 'numeric',
-  minute: '2-digit',
-})
 
 function getSessionPassword() {
   return (
@@ -220,76 +153,48 @@ async function createPkcePair() {
   }
 }
 
-function clamp(value: number, min: number, max: number) {
-  return Math.min(Math.max(value, min), max)
+type BackendDashboardEnvelope = {
+  dashboard: DashboardState
 }
 
-function formatTimestamp(timestamp: string) {
-  const date = new Date(timestamp)
-  return `${dayFormatter.format(date)} · ${timeFormatter.format(date)}`
+function getBackendApiBaseUrl() {
+  return process.env.VITE_API_BASE_URL ?? 'http://127.0.0.1:8000'
 }
 
-function createDefaultDashboardState(userName?: string): DashboardState {
-  const now = new Date()
+function getUserScope(user: LineUserProfile) {
   return {
-    capitalUsd: 15000,
-    activeStrategy: 'grid',
-    botStatus: 'paper-running',
-    paperRunCount: 7,
-    lastPaperRunAt: now.toISOString(),
-    lastBacktest: {
-      strategy: 'infinity-grid',
-      periodLabel: 'Last 180 days',
-      roiPct: 18.6,
-      maxDrawdownPct: 7.4,
-      profitFactor: 1.92,
-      winRatePct: 63.2,
-      trades: 114,
-      annualizedPct: 22.4,
-      completedAt: now.toISOString(),
-    },
-    bots: strategyCatalog.map((strategy) => ({ ...strategy })),
-    events: [
-      {
-        id: 'evt-open',
-        tone: 'positive',
-        title: `Session ready for ${userName ?? 'Operator'}`,
-        detail: 'LINE sign-in completed and paper trading controls are unlocked.',
-        timeLabel: 'Now',
-      },
-      {
-        id: 'evt-risk',
-        tone: 'neutral',
-        title: 'Risk envelope verified',
-        detail: 'Daily drawdown guardrail capped at 5% of simulated capital.',
-        timeLabel: '12 min ago',
-      },
-      {
-        id: 'evt-health',
-        tone: 'warning',
-        title: 'Volatility regime elevated',
-        detail: 'BTC 24h volatility is above the recent mean, so spreads were widened.',
-        timeLabel: '34 min ago',
-      },
-    ],
+    user_id: user.userId,
+    user_name: user.displayName,
   }
 }
 
-function ensureDashboardState(data: SessionData) {
-  if (!data.dashboard) {
-    data.dashboard = createDefaultDashboardState(data.user?.displayName)
+async function extractBackendError(response: Response) {
+  try {
+    const payload = (await response.json()) as { detail?: string }
+    if (typeof payload.detail === 'string' && payload.detail) {
+      return payload.detail
+    }
+  } catch {
+    // Fall back to the generic status message below.
   }
-  return data.dashboard
+  return `Backend request failed with status ${response.status}.`
 }
 
-function createEvent(title: string, detail: string, tone: ActivityEvent['tone']) {
-  return {
-    id: crypto.randomUUID(),
-    title,
-    detail,
-    tone,
-    timeLabel: 'Now',
+async function fetchBackend<T>(input: string, init?: RequestInit) {
+  const response = await fetch(input, init)
+
+  if (!response.ok) {
+    throw new Error(await extractBackendError(response))
   }
+
+  return (await response.json()) as T
+}
+
+async function fetchDashboardForUser(user: LineUserProfile) {
+  const url = new URL('/api/dashboard', getBackendApiBaseUrl())
+  url.searchParams.set('user_id', user.userId)
+  url.searchParams.set('user_name', user.displayName)
+  return fetchBackend<BackendDashboardEnvelope>(url.toString())
 }
 
 async function exchangeCodeForProfile(code: string, state: string) {
@@ -348,11 +253,9 @@ async function exchangeCodeForProfile(code: string, state: string) {
   }
 
   const profile = (await profileResponse.json()) as LineUserProfile
-  const dashboard = createDefaultDashboardState(profile.displayName)
 
   await session.update({
     user: profile,
-    dashboard,
     oauthState: undefined,
     pkceVerifier: undefined,
     intendedPath: undefined,
@@ -390,7 +293,6 @@ export const beginLineLogin = createServerFn({ method: 'POST' }).handler(
 
       await session.update({
         user: demoUser,
-        dashboard: createDefaultDashboardState(demoUser.displayName),
         oauthState: undefined,
         pkceVerifier: undefined,
         intendedPath: undefined,
@@ -457,15 +359,16 @@ export const logoutViewer = createServerFn({ method: 'POST' }).handler(async () 
 
 export const getDashboard = createServerFn({ method: 'GET' }).handler(async () => {
   const session = await useSession<SessionData>(getSessionConfig())
-  const dashboard = ensureDashboardState(session.data)
 
   if (!session.data.user) {
     throw new Error('You need to sign in before opening the dashboard.')
   }
 
+  const payload = await fetchDashboardForUser(session.data.user)
+
   return {
     viewer: session.data.user,
-    dashboard,
+    dashboard: payload.dashboard,
   }
 })
 
@@ -477,45 +380,21 @@ export const runPaperTrading = createServerFn({ method: 'POST' }).handler(
     if (!session.data.user) {
       throw new Error('You need to sign in before running the bot.')
     }
+    const payload = await fetchBackend<BackendDashboardEnvelope>(
+      new URL('/api/paper-trading/run', getBackendApiBaseUrl()).toString(),
+      {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          strategy: input.strategy,
+          ...getUserScope(session.data.user),
+        }),
+      },
+    )
 
-    const dashboard = ensureDashboardState(session.data)
-    const now = new Date().toISOString()
-
-    dashboard.activeStrategy = input.strategy
-    dashboard.botStatus = 'paper-running'
-    dashboard.paperRunCount += 1
-    dashboard.lastPaperRunAt = now
-    dashboard.bots = dashboard.bots.map((bot) => {
-      if (bot.key !== input.strategy) {
-        return {
-          ...bot,
-          status: bot.status === 'paper-running' ? 'backtest-ready' : bot.status,
-        }
-      }
-
-      const pnlDelta = Number((Math.random() * 1.8 + 0.6).toFixed(2))
-      return {
-        ...bot,
-        status: 'paper-running',
-        paperPnlPct: Number((bot.paperPnlPct + pnlDelta).toFixed(2)),
-        winRatePct: Number(clamp(bot.winRatePct + 0.8, 35, 92).toFixed(1)),
-        maxDrawdownPct: Number(clamp(bot.maxDrawdownPct + 0.2, 0.8, 8.9).toFixed(1)),
-        sharpeRatio: Number((bot.sharpeRatio + 0.06).toFixed(2)),
-        trades: bot.trades + 4,
-        lastSignal: `Paper engine redeployed at ${formatTimestamp(now)}`,
-      }
-    })
-    dashboard.events = [
-      createEvent(
-        `${strategyCatalog.find((bot) => bot.key === input.strategy)?.name} launched`,
-        'A new paper-trading cycle is running with simulated fills and risk rails enabled.',
-        'positive',
-      ),
-      ...dashboard.events.slice(0, 4),
-    ]
-
-    await session.update({ dashboard })
-    return dashboard
+    return payload.dashboard
   },
 )
 
@@ -527,44 +406,47 @@ export const runBacktest = createServerFn({ method: 'POST' }).handler(
     if (!session.data.user) {
       throw new Error('You need to sign in before running a backtest.')
     }
-
-    const dashboard = ensureDashboardState(session.data)
-    const now = new Date().toISOString()
-    const strategy = strategyCatalog.find((item) => item.key === input.strategy) ?? strategyCatalog[0]
-    const roiPct = Number((Math.random() * 7 + 12).toFixed(2))
-    const trades = Math.round(Math.random() * 70 + 85)
-
-    dashboard.lastBacktest = {
-      strategy: input.strategy,
-      periodLabel: 'Last 180 days',
-      roiPct,
-      maxDrawdownPct: Number((Math.random() * 3 + 5.4).toFixed(2)),
-      profitFactor: Number((Math.random() * 0.45 + 1.55).toFixed(2)),
-      winRatePct: Number((Math.random() * 8 + 58).toFixed(1)),
-      trades,
-      annualizedPct: Number((roiPct * 1.2).toFixed(2)),
-      completedAt: now,
-    }
-    dashboard.bots = dashboard.bots.map((bot) =>
-      bot.key === input.strategy
-        ? {
-            ...bot,
-            status: 'backtest-ready',
-            sharpeRatio: Number((bot.sharpeRatio + 0.04).toFixed(2)),
-            lastSignal: `Backtest completed at ${formatTimestamp(now)}`,
-          }
-        : bot,
+    const payload = await fetchBackend<BackendDashboardEnvelope>(
+      new URL('/api/backtests/run', getBackendApiBaseUrl()).toString(),
+      {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          strategy: input.strategy,
+          ...getUserScope(session.data.user),
+        }),
+      },
     )
-    dashboard.events = [
-      createEvent(
-        `${strategy.name} backtest finished`,
-        `180-day simulation closed with ${roiPct}% ROI across ${trades} model trades.`,
-        'neutral',
-      ),
-      ...dashboard.events.slice(0, 4),
-    ]
 
-    await session.update({ dashboard })
-    return dashboard
+    return payload.dashboard
+  },
+)
+
+export const depositPaperFunds = createServerFn({ method: 'POST' }).handler(
+  async ({ data }) => {
+    const input = (data ?? {}) as { amountUsd: number }
+    const session = await useSession<SessionData>(getSessionConfig())
+
+    if (!session.data.user) {
+      throw new Error('You need to sign in before funding the paper wallet.')
+    }
+
+    const payload = await fetchBackend<BackendDashboardEnvelope>(
+      new URL('/api/paper-trading/deposits', getBackendApiBaseUrl()).toString(),
+      {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          amount_usd: input.amountUsd,
+          ...getUserScope(session.data.user),
+        }),
+      },
+    )
+
+    return payload.dashboard
   },
 )

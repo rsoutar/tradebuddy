@@ -1,9 +1,10 @@
 import { useMemo, useState } from 'react'
-import type { ReactNode } from 'react'
+import type { FormEvent, ReactNode } from 'react'
 import { Link, createFileRoute, redirect } from '@tanstack/react-router'
 import { Icon } from '@iconify/react'
 import type { DashboardState, StrategyKey } from '../lib/session'
 import {
+  depositPaperFunds,
   getDashboard,
   getViewer,
   logoutViewer,
@@ -222,6 +223,7 @@ function SidebarItem({
 
 function MetricCard({
   label,
+  labelAction,
   value,
   icon,
   accent,
@@ -230,6 +232,7 @@ function MetricCard({
   progress,
 }: {
   label: string
+  labelAction?: ReactNode
   value: ReactNode
   icon: string
   accent?: 'positive' | 'negative'
@@ -240,7 +243,10 @@ function MetricCard({
   return (
     <div className="flex flex-col justify-between rounded-xl border border-zinc-800/60 bg-zinc-900/40 p-5">
       <div className="mb-4 flex items-start justify-between text-zinc-400">
-        <span className="text-sm font-normal">{label}</span>
+        <div className="flex items-center gap-2">
+          <span className="text-sm font-normal">{label}</span>
+          {labelAction}
+        </div>
         <Icon icon={icon} width={18} height={18} />
       </div>
       <div>
@@ -284,8 +290,15 @@ function DashboardPage() {
   const [isBacktesting, setIsBacktesting] = useState(false)
   const [isRefreshing, setIsRefreshing] = useState(false)
   const [isLoggingOut, setIsLoggingOut] = useState(false)
+  const [isProfileMenuOpen, setIsProfileMenuOpen] = useState(false)
+  const [isDepositModalOpen, setIsDepositModalOpen] = useState(false)
+  const [depositAmount, setDepositAmount] = useState('')
+  const [depositError, setDepositError] = useState<string>()
+  const [isDepositing, setIsDepositing] = useState(false)
   const [actionError, setActionError] = useState<string>()
   const [searchValue, setSearchValue] = useState('')
+  const viewerSubtitle =
+    loaderData.viewer.statusMessage || `@${loaderData.viewer.userId.slice(0, 10)}`
 
   const selectedBot = dashboard.bots.find((bot) => bot.key === selectedStrategy) ?? dashboard.bots[0]
   const activeBots = dashboard.bots.filter((bot) => bot.status === 'paper-running').length
@@ -324,61 +337,35 @@ function DashboardPage() {
     }
   })
 
-  const activityLog = [
-    {
-      id: 1,
-      icon: 'solar:check-circle-linear',
-      color: 'emerald',
-      title: 'Trend Follower V1',
-      action: 'BUY',
-      detail: 'executed order for 0.045 BTC at $34,210.50',
-      time: '2 mins ago',
-    },
-    {
-      id: 2,
-      icon: 'solar:info-circle-linear',
-      color: 'blue',
-      title: 'Grid Infinity',
-      action: '',
-      detail: 'placed limit sell at $1,850.00',
-      time: '15 mins ago',
-    },
-    {
-      id: 3,
-      icon: 'solar:refresh-linear',
-      color: 'zinc',
-      title: 'System',
-      action: '',
-      detail: 'synced with Binance API successfully. Latency: 45ms',
-      time: '1 hour ago',
-    },
-    {
-      id: 4,
-      icon: 'solar:danger-triangle-linear',
-      color: 'rose',
-      title: 'Sniper SOL',
-      action: '',
-      detail: 'stopped manually by user',
-      time: '3 hours ago',
-    },
-    {
-      id: 5,
-      icon: 'solar:check-circle-linear',
-      color: 'emerald',
-      title: 'Trend Follower V1',
-      action: 'SELL',
-      detail: 'executed order for 0.045 BTC at $34,500.00',
-      profit: 13.02,
-      time: '5 hours ago',
-    },
-  ]
+  const activityLog = useMemo(
+    () =>
+      dashboard.events.map((event) => ({
+        id: event.id,
+        icon:
+          event.tone === 'positive'
+            ? 'solar:check-circle-linear'
+            : event.tone === 'warning'
+              ? 'solar:danger-triangle-linear'
+              : 'solar:info-circle-linear',
+        color:
+          event.tone === 'positive'
+            ? 'emerald'
+            : event.tone === 'warning'
+              ? 'rose'
+              : 'blue',
+        title: event.title,
+        detail: event.detail,
+        time: event.timeLabel,
+      })),
+    [dashboard.events],
+  )
 
   const filteredActivityLog = useMemo(() => {
     const needle = searchValue.trim().toLowerCase()
     if (!needle) return activityLog
 
     return activityLog.filter((log) =>
-      `${log.title} ${log.action} ${log.detail} ${log.time}`.toLowerCase().includes(needle),
+      `${log.title} ${log.detail} ${log.time}`.toLowerCase().includes(needle),
     )
   }, [activityLog, searchValue])
 
@@ -437,6 +424,33 @@ function DashboardPage() {
     }
   }
 
+  async function handleDepositSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+
+    const amountValue = Number.parseFloat(depositAmount)
+    if (!Number.isFinite(amountValue) || amountValue <= 0) {
+      setDepositError('Enter a deposit amount greater than $0.')
+      return
+    }
+
+    try {
+      setActionError(undefined)
+      setDepositError(undefined)
+      setIsDepositing(true)
+      const nextDashboard = await depositPaperFunds({
+        // @ts-ignore
+        data: { amountUsd: amountValue },
+      })
+      setDashboard(nextDashboard)
+      setDepositAmount('')
+      setIsDepositModalOpen(false)
+    } catch (error) {
+      setDepositError(error instanceof Error ? error.message : 'Unable to deposit funds right now.')
+    } finally {
+      setIsDepositing(false)
+    }
+  }
+
   return (
     <div
       className="flex h-screen overflow-hidden bg-zinc-950 text-zinc-300 font-sans antialiased selection:bg-zinc-800 selection:text-zinc-100"
@@ -492,29 +506,107 @@ function DashboardPage() {
           ))}
         </nav>
 
-        <div className="border-t border-zinc-800/60 p-4">
+        <div className="relative border-t border-zinc-800/60 p-4">
+          {isProfileMenuOpen ? (
+            <button
+              aria-label="Close profile menu"
+              className="fixed inset-0 z-20"
+              type="button"
+              onClick={() => setIsProfileMenuOpen(false)}
+            />
+          ) : null}
+
+          {isProfileMenuOpen ? (
+            <div className="absolute bottom-[calc(100%-0.5rem)] left-4 right-4 z-30 overflow-hidden rounded-2xl border border-zinc-800 bg-zinc-950 shadow-2xl shadow-black/50">
+              <div className="flex items-center gap-3 border-b border-zinc-800/80 px-4 py-4">
+                {loaderData.viewer.pictureUrl ? (
+                  <img
+                    alt={`${loaderData.viewer.displayName} avatar`}
+                    className="h-11 w-11 rounded-xl object-cover ring-1 ring-zinc-700/70"
+                    src={loaderData.viewer.pictureUrl}
+                  />
+                ) : (
+                  <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-zinc-800 text-sm font-semibold text-zinc-100 ring-1 ring-zinc-700/70">
+                    {loaderData.viewer.displayName.slice(0, 2).toUpperCase()}
+                  </div>
+                )}
+                <div className="min-w-0">
+                  <p className="truncate text-sm font-medium text-zinc-100">
+                    {loaderData.viewer.displayName}
+                  </p>
+                  <p className="truncate text-xs text-zinc-500">{viewerSubtitle}</p>
+                </div>
+              </div>
+
+              <div className="p-2">
+                {[
+                  { label: 'Account', icon: 'solar:user-circle-linear' },
+                  { label: 'Billing', icon: 'solar:wallet-money-linear' },
+                  { label: 'Notifications', icon: 'solar:bell-linear' },
+                ].map((item) => (
+                  <button
+                    className="flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left text-sm text-zinc-300 transition hover:bg-zinc-900 hover:text-zinc-100"
+                    key={item.label}
+                    type="button"
+                    onClick={() => setIsProfileMenuOpen(false)}
+                  >
+                    <Icon icon={item.icon} width={17} height={17} className="text-zinc-500" />
+                    <span>{item.label}</span>
+                  </button>
+                ))}
+
+                <div className="my-2 border-t border-zinc-800/80" />
+
+                <button
+                  className="flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left text-sm text-zinc-300 transition hover:bg-rose-500/10 hover:text-rose-200"
+                  disabled={isLoggingOut}
+                  type="button"
+                  onClick={() => {
+                    setIsProfileMenuOpen(false)
+                    void handleLogout()
+                  }}
+                >
+                  <Icon icon="solar:logout-2-linear" width={17} height={17} className="text-zinc-500" />
+                  <span>{isLoggingOut ? 'Logging out...' : 'Log out'}</span>
+                </button>
+              </div>
+            </div>
+          ) : null}
+
           <button
-            className="flex w-full items-center gap-3 rounded-md p-2 text-left transition-colors hover:bg-zinc-800/30"
+            aria-expanded={isProfileMenuOpen}
+            className="relative z-30 flex w-full items-center gap-3 rounded-xl border border-zinc-800 bg-zinc-900/80 p-2.5 text-left transition hover:border-zinc-700 hover:bg-zinc-900"
             disabled={isLoggingOut}
             type="button"
             onClick={() => {
-              void handleLogout()
+              setIsProfileMenuOpen((current) => !current)
             }}
           >
-            <div className="flex h-8 w-8 items-center justify-center rounded-full border border-zinc-700 bg-zinc-800 text-zinc-400">
-              <Icon icon="solar:user-linear" width={16} height={16} />
-            </div>
+            {loaderData.viewer.pictureUrl ? (
+              <img
+                alt={`${loaderData.viewer.displayName} avatar`}
+                className="h-10 w-10 rounded-xl object-cover ring-1 ring-zinc-700/70"
+                src={loaderData.viewer.pictureUrl}
+              />
+            ) : (
+              <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-zinc-800 text-sm font-semibold text-zinc-100 ring-1 ring-zinc-700/70">
+                {loaderData.viewer.displayName.slice(0, 2).toUpperCase()}
+              </div>
+            )}
             <div className="min-w-0 flex-1 overflow-hidden">
-              <p className="truncate text-sm font-normal text-zinc-200">
-                {isLoggingOut ? 'Logging out...' : loaderData.viewer.displayName}
+              <p className="truncate text-sm font-medium text-zinc-100">
+                {loaderData.viewer.displayName}
               </p>
-              <p className="truncate text-xs text-zinc-500">Pro Plan</p>
+              <p className="truncate text-xs text-zinc-500">{viewerSubtitle}</p>
             </div>
             <Icon
-              icon="solar:alt-arrow-up-linear"
-              width={16}
-              height={16}
-              className="text-zinc-500"
+              icon="solar:menu-dots-bold"
+              width={18}
+              height={18}
+              className={cx(
+                'shrink-0 text-zinc-500 transition-colors',
+                isProfileMenuOpen && 'text-zinc-300',
+              )}
             />
           </button>
         </div>
@@ -583,6 +675,19 @@ function DashboardPage() {
               }
               icon="solar:wallet-linear"
               label="Total Balance"
+              labelAction={
+                <button
+                  className="inline-flex h-7 items-center gap-1 rounded-md border border-zinc-700 bg-zinc-800 px-2.5 text-[11px] font-semibold uppercase tracking-[0.16em] text-zinc-100 shadow-sm transition hover:border-emerald-400/50 hover:bg-emerald-500/15 hover:text-emerald-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-400/60"
+                  type="button"
+                  onClick={() => {
+                    setDepositError(undefined)
+                    setIsDepositModalOpen(true)
+                  }}
+                >
+                  <Icon icon="solar:add-circle-linear" width={12} height={12} />
+                  Deposit
+                </button>
+              }
               value={formatCurrency(metricsData.totalBalance)}
             />
             <MetricCard
@@ -847,19 +952,9 @@ function DashboardPage() {
                         </div>
                         <div>
                           <p className="leading-relaxed text-zinc-300">
-                            <span className="font-medium text-zinc-100">{log.title}</span>{' '}
-                            {log.action ? (
-                              <span className={log.action === 'BUY' ? 'text-emerald-400' : 'text-rose-400'}>
-                                {log.action}
-                              </span>
-                            ) : null}{' '}
-                            {log.detail}
-                            {log.profit ? (
-                              <>
-                                <br />
-                                <span className="text-xs text-emerald-400">Profit: +${log.profit}</span>
-                              </>
-                            ) : null}
+                            <span className="font-medium text-zinc-100">{log.title}</span>
+                            <br />
+                            <span>{log.detail}</span>
                           </p>
                           <p className="mt-0.5 text-xs text-zinc-500">{log.time}</p>
                         </div>
@@ -893,6 +988,77 @@ function DashboardPage() {
           </div>
         </div>
       </main>
+
+      {isDepositModalOpen ? (
+        <div className="fixed inset-0 z-40 flex items-center justify-center bg-black/65 px-4 backdrop-blur-sm">
+          <button
+            aria-label="Close deposit modal"
+            className="absolute inset-0"
+            type="button"
+            onClick={() => {
+              if (isDepositing) return
+              setIsDepositModalOpen(false)
+            }}
+          />
+          <div className="relative z-10 w-full max-w-md overflow-hidden rounded-2xl border border-zinc-800 bg-zinc-950 shadow-2xl shadow-black/50">
+            <div className="border-b border-zinc-800/80 bg-[radial-gradient(circle_at_top,_rgba(16,185,129,0.14),_transparent_55%)] px-6 py-5">
+              <p className="text-xs font-medium uppercase tracking-[0.3em] text-emerald-400/80">
+                Paper Wallet
+              </p>
+              <h2 className="mt-2 text-2xl font-medium tracking-tight text-zinc-100">
+                Deposit USD
+              </h2>
+              <p className="mt-2 text-sm leading-6 text-zinc-400">
+                New paper-trading users start with $100. Add more virtual capital whenever you
+                need it.
+              </p>
+            </div>
+
+            <form className="space-y-5 px-6 py-6" onSubmit={handleDepositSubmit}>
+              <label className="block">
+                <span className="mb-2 block text-sm font-medium text-zinc-300">Amount in USD</span>
+                <div className="flex items-center rounded-xl border border-zinc-800 bg-zinc-900/80 px-4">
+                  <span className="text-lg text-zinc-500">$</span>
+                  <input
+                    className="w-full bg-transparent px-3 py-4 text-lg text-zinc-100 outline-none placeholder:text-zinc-600"
+                    inputMode="decimal"
+                    placeholder="100.00"
+                    type="number"
+                    min="0.01"
+                    step="0.01"
+                    value={depositAmount}
+                    onChange={(event) => setDepositAmount(event.target.value)}
+                  />
+                </div>
+              </label>
+
+              {depositError ? (
+                <div className="rounded-xl border border-rose-500/20 bg-rose-500/10 px-4 py-3 text-sm text-rose-300">
+                  {depositError}
+                </div>
+              ) : null}
+
+              <div className="flex items-center justify-end gap-3">
+                <button
+                  className="rounded-xl border border-zinc-700 px-4 py-2 text-sm text-zinc-300 transition hover:border-zinc-500 hover:text-zinc-100"
+                  disabled={isDepositing}
+                  type="button"
+                  onClick={() => setIsDepositModalOpen(false)}
+                >
+                  Cancel
+                </button>
+                <button
+                  className="rounded-xl bg-emerald-400 px-4 py-2 text-sm font-medium text-zinc-950 transition hover:bg-emerald-300 disabled:cursor-not-allowed disabled:bg-emerald-400/60"
+                  disabled={isDepositing}
+                  type="submit"
+                >
+                  {isDepositing ? 'Depositing...' : 'Deposit funds'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      ) : null}
     </div>
   )
 }

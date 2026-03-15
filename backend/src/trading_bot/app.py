@@ -14,6 +14,7 @@ from trading_bot.models import (
     RebalanceBotConfig,
     StrategyType,
 )
+from trading_bot.paper_store import PaperTradingStore
 from trading_bot.services.exchange import CcxtExchangeClient, MockExchangeClient
 from trading_bot.services.binance_ws import BinanceSpotWebSocketMarketData
 from trading_bot.services.market_data import MarketDataService
@@ -34,13 +35,8 @@ class TradingBotApp:
             self.exchange_client,
             market_stream=self._create_market_stream(),
         )
+        self.paper_store = PaperTradingStore(settings.runtime.state_dir / "paper_trading.sqlite3")
         self.risk_manager = RiskManager()
-        self._active_strategy = StrategyType.GRID
-        self._bot_status = "idle"
-        self._paper_run_count = 0
-        self._last_paper_run_at: str | None = None
-        self._last_backtest: dict[str, Any] | None = None
-        self._event_history: list[dict[str, str]] = []
 
     def _create_exchange_client(self):
         if self.settings.exchange.api_key and self.settings.exchange.api_secret:
@@ -141,11 +137,13 @@ class TradingBotApp:
         evaluation_data: dict[str, Any],
         snapshot: MarketSnapshot,
         allocation_pct: int,
+        account_state: dict[str, Any],
     ) -> dict[str, Any]:
         evaluation = evaluation_data["evaluation"]
         risk = evaluation_data["risk"]
         warning_count = len(evaluation.warnings) + len(risk.warnings)
         order_count = len(evaluation.orders)
+        last_backtest = account_state["last_backtest"]
 
         pnl_modifiers = {
             StrategyType.GRID: 0.65,
@@ -171,9 +169,12 @@ class TradingBotApp:
         win_rate_pct = round(max(35.0, min(92.0, 56.0 + (order_count * 1.7) - (warning_count * 6))), 1)
         sharpe_ratio = round(max(0.4, min(3.2, (paper_pnl_pct / max(max_drawdown_pct, 0.8)) + 0.55)), 2)
         status = "idle"
-        if self._bot_status == "paper-running" and self._active_strategy is strategy_type:
+        if (
+            account_state["bot_status"] == "paper-running"
+            and account_state["active_strategy"] == strategy_type.value
+        ):
             status = "paper-running"
-        elif self._last_backtest and self._last_backtest["strategy"] == strategy_type.value:
+        elif last_backtest and last_backtest["strategy"] == strategy_type.value:
             status = "backtest-ready"
 
         last_signal = (
@@ -221,27 +222,14 @@ class TradingBotApp:
         suffix = "" if diff_days == 1 else "s"
         return f"{diff_days} day{suffix} ago"
 
-    def _push_event(self, tone: str, title: str, detail: str, timestamp: str | None = None) -> None:
-        occurred_at = timestamp or self._timestamp()
-        self._event_history.insert(
-            0,
-            {
-                "id": f"evt-{len(self._event_history) + 1}",
-                "tone": tone,
-                "title": title,
-                "detail": detail,
-                "timestamp": occurred_at,
-            },
-        )
-        self._event_history = self._event_history[:6]
-
     def _default_events(
         self,
         snapshot: MarketSnapshot,
         evaluation_data: list[dict[str, Any]],
+        persisted_events: list[dict[str, Any]],
     ) -> list[dict[str, str]]:
         events: list[dict[str, str]] = []
-        for item in self._event_history[:3]:
+        for item in persisted_events[:3]:
             events.append(
                 {
                     "id": item["id"],
@@ -307,13 +295,25 @@ class TradingBotApp:
                 total += balance.free
         return round(total, 2)
 
-    def dashboard(self) -> dict[str, Any]:
+    def _paper_balances(self, account_state: dict[str, Any]) -> list[Balance]:
+        return [
+            Balance(asset="BTC", free=0.0, locked=0.0),
+            Balance(asset="USDT", free=account_state["usd_balance"], locked=0.0),
+        ]
+
+    def dashboard(self, user_id: str = "demo-user", user_name: str = "Demo Trader") -> dict[str, Any]:
         snapshot = self.market_data.get_snapshot(self.settings.runtime.symbol)
-        balances = self.exchange_client.fetch_balances()
+        account_state = self.paper_store.ensure_account(
+            user_id=user_id,
+            user_name=user_name,
+            timestamp=self._timestamp(),
+        )
+        balances = self._paper_balances(account_state)
         evaluations = [
             self._evaluate_strategy(strategy_type, snapshot, balances)
             for strategy_type in StrategyType
         ]
+        persisted_events = self.paper_store.list_events(user_id=user_id)
 
         total_notional = sum(item["notional"] for item in evaluations)
         if total_notional <= 0:
@@ -336,6 +336,7 @@ class TradingBotApp:
                 item,
                 snapshot,
                 allocation_map.get(item["strategy"], 0),
+                account_state,
             )
             for item in evaluations
         ]
@@ -347,13 +348,13 @@ class TradingBotApp:
             "balances": [asdict(balance) for balance in balances],
             "dashboard": {
                 "capitalUsd": self._capital_usd(balances, snapshot),
-                "activeStrategy": self._active_strategy.value,
-                "botStatus": self._bot_status,
-                "paperRunCount": self._paper_run_count,
-                "lastPaperRunAt": self._last_paper_run_at,
-                "lastBacktest": self._last_backtest,
+                "activeStrategy": account_state["active_strategy"],
+                "botStatus": account_state["bot_status"],
+                "paperRunCount": account_state["paper_run_count"],
+                "lastPaperRunAt": account_state["last_paper_run_at"],
+                "lastBacktest": account_state["last_backtest"],
                 "bots": bots,
-                "events": self._default_events(snapshot, evaluations),
+                "events": self._default_events(snapshot, evaluations, persisted_events),
             },
         }
 
@@ -369,22 +370,35 @@ class TradingBotApp:
         payload["balances"] = [asdict(balance) for balance in balances]
         return payload
 
-    def run_paper_trading(self, strategy_type: StrategyType) -> dict[str, Any]:
-        self._active_strategy = strategy_type
-        self._bot_status = "paper-running"
-        self._paper_run_count += 1
-        self._last_paper_run_at = self._timestamp()
-        self._push_event(
-            "positive",
-            f"{self._strategy_label(strategy_type)} paper run started",
-            "Paper trading is active with simulated fills and live market snapshots.",
-            self._last_paper_run_at,
+    def run_paper_trading(
+        self,
+        strategy_type: StrategyType,
+        user_id: str = "demo-user",
+        user_name: str = "Demo Trader",
+    ) -> dict[str, Any]:
+        timestamp = self._timestamp()
+        self.paper_store.record_paper_run(
+            user_id=user_id,
+            user_name=user_name,
+            strategy=strategy_type.value,
+            strategy_label=self._strategy_label(strategy_type),
+            timestamp=timestamp,
         )
-        return self.dashboard()
+        return self.dashboard(user_id=user_id, user_name=user_name)
 
-    def run_backtest(self, strategy_type: StrategyType) -> dict[str, Any]:
+    def run_backtest(
+        self,
+        strategy_type: StrategyType,
+        user_id: str = "demo-user",
+        user_name: str = "Demo Trader",
+    ) -> dict[str, Any]:
         snapshot = self.market_data.get_snapshot(self.settings.runtime.symbol)
-        balances = self.exchange_client.fetch_balances()
+        account_state = self.paper_store.ensure_account(
+            user_id=user_id,
+            user_name=user_name,
+            timestamp=self._timestamp(),
+        )
+        balances = self._paper_balances(account_state)
         evaluation_data = self._evaluate_strategy(strategy_type, snapshot, balances)
         evaluation = evaluation_data["evaluation"]
         risk = evaluation_data["risk"]
@@ -398,7 +412,7 @@ class TradingBotApp:
         )
         max_drawdown_pct = round(max(1.0, snapshot.volatility_24h_pct * 2.1), 2)
         trades = max(len(evaluation.orders) * 12, 8)
-        self._last_backtest = {
+        last_backtest = {
             "strategy": strategy_type.value,
             "periodLabel": "Last 90 days",
             "roiPct": roi_pct,
@@ -409,13 +423,30 @@ class TradingBotApp:
             "annualizedPct": round(roi_pct * 1.35, 2),
             "completedAt": completed_at,
         }
-        self._push_event(
-            "neutral" if risk.accepted else "warning",
-            f"{self._strategy_label(strategy_type)} backtest completed",
-            "A fresh strategy preview is available for the dashboard.",
-            completed_at,
+        self.paper_store.record_backtest(
+            user_id=user_id,
+            user_name=user_name,
+            strategy=strategy_type.value,
+            strategy_label=self._strategy_label(strategy_type),
+            backtest_summary=last_backtest,
+            tone="neutral" if risk.accepted else "warning",
+            timestamp=completed_at,
         )
-        return self.dashboard()
+        return self.dashboard(user_id=user_id, user_name=user_name)
+
+    def deposit_paper_funds(
+        self,
+        amount_usd: float,
+        user_id: str = "demo-user",
+        user_name: str = "Demo Trader",
+    ) -> dict[str, Any]:
+        self.paper_store.record_deposit(
+            user_id=user_id,
+            user_name=user_name,
+            amount_usd=round(amount_usd, 2),
+            timestamp=self._timestamp(),
+        )
+        return self.dashboard(user_id=user_id, user_name=user_name)
 
 
 def create_app() -> TradingBotApp:
