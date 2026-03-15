@@ -39,8 +39,15 @@ pip install -e ".[live]"
 ```bash
 cd frontend
 npm install
+cp .env.example .env
 npm run dev
 ```
+
+Frontend auth variables:
+
+- `AUTH_SESSION_SECRET` secures the signed session cookie used after login.
+- `LINE_CHANNEL_ID` and `LINE_CHANNEL_SECRET` enable the live LINE Login flow.
+- `LINE_REDIRECT_URI` is optional; if omitted, the app uses the current origin plus `/auth/line`.
 
 On first run, TanStack Start generates `src/routeTree.gen.ts`.
 

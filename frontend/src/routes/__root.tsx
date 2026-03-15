@@ -1,4 +1,5 @@
 /// <reference types="vite/client" />
+import { useState } from 'react'
 import type { ReactNode } from 'react'
 import {
   HeadContent,
@@ -8,9 +9,11 @@ import {
   createRootRoute,
 } from '@tanstack/react-router'
 import { TanStackRouterDevtools } from '@tanstack/react-router-devtools'
+import { getViewer, logoutViewer } from '../lib/session'
 import appCss from '../styles/app.css?url'
 
 export const Route = createRootRoute({
+  loader: () => getViewer(),
   head: () => ({
     meta: [
       { charSet: 'utf-8' },
@@ -20,7 +23,7 @@ export const Route = createRootRoute({
       },
       {
         name: 'description',
-        content: 'A premium trading bot dashboard concept for strategy, onboarding, and AI guidance.',
+        content: 'LINE-authenticated trading bot dashboard for paper trading, backtesting, and strategy metrics.',
       },
     ],
     links: [
@@ -37,6 +40,19 @@ export const Route = createRootRoute({
 })
 
 function RootComponent() {
+  const viewer = Route.useLoaderData()
+  const [isLoggingOut, setIsLoggingOut] = useState(false)
+
+  async function handleLogout() {
+    try {
+      setIsLoggingOut(true)
+      await logoutViewer()
+      window.location.assign('/')
+    } finally {
+      setIsLoggingOut(false)
+    }
+  }
+
   return (
     <RootDocument>
       <div className="app-shell">
@@ -44,38 +60,63 @@ function RootComponent() {
         <div className="ambient ambient-b" />
         <div className="ambient ambient-c" />
         <header className="topbar">
-          <div className="brand">
+          <Link className="brand" to="/">
             <span className="brand-mark">O</span>
             <div>
               <p className="eyebrow">Oscar Trading Bot</p>
-              <h1>Mobile-first exchange concept</h1>
+              <h1>LINE-authenticated control room</h1>
             </div>
-          </div>
+          </Link>
           <nav className="nav">
             <Link to="/" activeProps={{ className: 'active' }} activeOptions={{ exact: true }}>
-              Overview
+              Home
+            </Link>
+            <Link to="/dashboard" activeProps={{ className: 'active' }}>
+              Dashboard
             </Link>
             <Link to="/onboarding" activeProps={{ className: 'active' }}>
-              Onboarding
+              Setup
             </Link>
             <Link to="/bots" activeProps={{ className: 'active' }}>
-              Bot Prototypes
+              Strategies
             </Link>
             <Link to="/ai" activeProps={{ className: 'active' }}>
-              AI Workspace
+              Research
             </Link>
           </nav>
-          <div className="status-pill">
-            <span className="status-dot" aria-hidden="true" />
-            Soft launch aesthetic
+          <div className="topbar-actions">
+            <div className="status-pill">
+              <span className="status-dot" aria-hidden="true" />
+              {viewer.authenticated
+                ? `Signed in as ${viewer.user?.displayName}`
+                : viewer.lineConfigured
+                  ? 'LINE Login ready'
+                  : 'Demo login mode'}
+            </div>
+            {viewer.authenticated ? (
+              <button
+                type="button"
+                className="secondary-button"
+                onClick={() => {
+                  void handleLogout()
+                }}
+                disabled={isLoggingOut}
+              >
+                {isLoggingOut ? 'Logging out...' : 'Log out'}
+              </button>
+            ) : (
+              <Link className="secondary-link" to="/">
+                Sign in
+              </Link>
+            )}
           </div>
         </header>
         <main className="main-content">
           <Outlet />
         </main>
         <div className="bottom-note">
-          <p className="eyebrow">Reference direction</p>
-          <strong>Glossy trading cards, pastel lighting, and stacked mobile layouts.</strong>
+          <p className="eyebrow">Live focus</p>
+          <strong>LINE sign-in, paper-trading controls, backtests, and bot health in one place.</strong>
         </div>
       </div>
       <TanStackRouterDevtools position="bottom-right" />

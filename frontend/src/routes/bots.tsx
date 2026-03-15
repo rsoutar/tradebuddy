@@ -1,30 +1,20 @@
 import { createFileRoute } from '@tanstack/react-router'
-import { StatsPhone, StrategyPhone } from '../components/showcase'
 
-const botCards = [
+const strategies = [
   {
-    name: 'Grid Bot',
-    description: 'Oscillation-focused order ladder inside a fixed price range.',
-    mode: 'Sideways',
-    allocation: '35%',
-    spread: '0.8%',
-    pnl: '+4.2% expected',
+    title: 'Grid Bot',
+    regime: 'Sideways',
+    detail: 'Places staggered simulated orders inside a defined BTC range and recycles capital on each fill.',
   },
   {
-    name: 'Rebalance Bot',
-    description: 'Target allocation strategy that nudges the portfolio back toward a BTC ratio.',
-    mode: 'Steady',
-    allocation: '50%',
-    spread: '1.2%',
-    pnl: '+2.6% expected',
+    title: 'Rebalance Bot',
+    regime: 'Steady',
+    detail: 'Keeps portfolio weights near a target allocation with smaller, lower-frequency adjustments.',
   },
   {
-    name: 'Infinity Grid Bot',
-    description: 'Bull-market ladder that keeps extending as price rises.',
-    mode: 'Trend',
-    allocation: '65%',
-    spread: '1.6%',
-    pnl: '+6.8% expected',
+    title: 'Infinity Grid',
+    regime: 'Trend',
+    detail: 'Extends upward with price momentum while preserving trailing exits to protect paper gains.',
   },
 ]
 
@@ -35,46 +25,31 @@ export const Route = createFileRoute('/bots')({
 function BotsPage() {
   return (
     <div className="page">
-      <section className="showcase-grid showcase-grid-tight">
-        <div className="showcase-copy">
-          <p className="eyebrow">Bot Prototypes</p>
-          <h2>Each strategy now reads like a polished product state, not just a config card.</h2>
+      <section className="hero-grid compact-grid">
+        <div className="hero-copy">
+          <p className="eyebrow">Strategies</p>
+          <h2>Three bot profiles, each tuned for a different market rhythm.</h2>
           <p className="lede">
-            Grid, rebalance, and infinity grid are presented as glossy trading presets with clear
-            modes, spacing, and projected outcomes. That keeps the technical detail while making
-            the experience feel launch-ready.
+            Use the dashboard to switch between these bot profiles, run paper trading, and compare
+            how each one behaves under backtest.
           </p>
         </div>
-        <div className="phone-wall bots-wall" aria-label="Strategy preview screens">
-          <StrategyPhone
-            title="Grid Bot"
-            mode="Sideways"
-            allocation="35%"
-            spread="0.8%"
-            pnl="+4.2% expected"
-          />
-          <StrategyPhone
-            title="Rebalance"
-            mode="Steady"
-            allocation="50%"
-            spread="1.2%"
-            pnl="+2.6% expected"
-          />
-          <StatsPhone />
+        <div className="panel">
+          <p className="eyebrow">Selection Guide</p>
+          <h3>Choose by regime, not by hype.</h3>
+          <p className="panel-copy">
+            Grid for chop, rebalance for steadier accumulation, and infinity grid when trend
+            persistence matters more than mean reversion.
+          </p>
         </div>
       </section>
 
-      <section className="feature-grid">
-        {botCards.map((bot) => (
-          <article className="feature-card" key={bot.name}>
-            <p className="eyebrow">{bot.mode}</p>
-            <h3>{bot.name}</h3>
-            <p>{bot.description}</p>
-            <div className="feature-meta">
-              <span>{bot.allocation} capital</span>
-              <span>{bot.spread} interval</span>
-              <span>{bot.pnl}</span>
-            </div>
+      <section className="content-grid">
+        {strategies.map((strategy) => (
+          <article className="feature-card" key={strategy.title}>
+            <p className="eyebrow">{strategy.regime}</p>
+            <h3>{strategy.title}</h3>
+            <p>{strategy.detail}</p>
           </article>
         ))}
       </section>

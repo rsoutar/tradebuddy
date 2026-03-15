@@ -1,10 +1,9 @@
 import { createFileRoute } from '@tanstack/react-router'
-import { AssistantPhone, MarketPhone } from '../components/showcase'
 
 const prompts = [
-  'What is the current BTC market volatility regime?',
-  'Suggest grid settings for a sideways market.',
-  'How far is the current portfolio from a 50/50 BTC-USDT target?',
+  'Summarize the current BTC volatility regime for paper-trading decisions.',
+  'Recommend spread settings for the grid bot when the range is widening.',
+  'Compare the latest backtest against the active paper bot and flag risk drift.',
 ]
 
 export const Route = createFileRoute('/ai')({
@@ -14,30 +13,30 @@ export const Route = createFileRoute('/ai')({
 function AIPage() {
   return (
     <div className="page">
-      <section className="showcase-grid showcase-grid-tight">
-        <div className="showcase-copy">
-          <p className="eyebrow">AI Workspace</p>
-          <h2>The assistant route now feels like a live strategy studio for market decisions.</h2>
+      <section className="hero-grid compact-grid">
+        <div className="hero-copy">
+          <p className="eyebrow">Research</p>
+          <h2>Use AI as a strategy analyst, not a replacement for the dashboard.</h2>
           <p className="lede">
-            Prompts, notes, and portfolio context sit inside the same floating mobile language, so
-            the AI layer feels native to the trading product instead of bolted on later.
+            The dashboard gives the operational controls; this route frames the kind of market
+            questions an assistant can answer around regime, risk, and configuration tuning.
           </p>
-        </div>
-        <div className="phone-wall ai-wall" aria-label="AI workspace preview screens">
-          <AssistantPhone />
-          <MarketPhone />
         </div>
       </section>
 
-      <div className="feature-card feature-card-wide">
-        <p className="eyebrow">Sample queries</p>
-        <h3>Prompt set for the phase-two market assistant.</h3>
+      <article className="panel">
+        <div className="panel-head">
+          <div>
+            <p className="eyebrow">Prompt Pack</p>
+            <h3>Useful analyst prompts</h3>
+          </div>
+        </div>
         <ul className="prompt-list">
           {prompts.map((prompt) => (
             <li key={prompt}>{prompt}</li>
           ))}
         </ul>
-      </div>
+      </article>
     </div>
   )
 }

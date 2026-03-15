@@ -1,10 +1,9 @@
 import { createFileRoute } from '@tanstack/react-router'
-import { SetupPhone, SwapPhone } from '../components/showcase'
 
 const steps = [
-  'Connect exchange credentials from a local environment file',
-  'Choose a strategy type and start with simulation mode',
-  'Confirm risk settings before enabling live execution',
+  'Add LINE Login credentials and a session secret to the frontend environment.',
+  'Validate paper-trading capital, risk limits, and allowed strategies before any live wiring.',
+  'Use backtesting to compare drawdown, win rate, and profit factor before promoting a bot.',
 ]
 
 export const Route = createFileRoute('/onboarding')({
@@ -14,30 +13,25 @@ export const Route = createFileRoute('/onboarding')({
 function OnboardingPage() {
   return (
     <div className="page">
-      <section className="showcase-grid showcase-grid-tight">
-        <div className="showcase-copy">
-          <p className="eyebrow">Onboarding</p>
-          <h2>Safety steps are now part of the product story, not hidden in a dry checklist.</h2>
+      <section className="hero-grid compact-grid">
+        <div className="hero-copy">
+          <p className="eyebrow">Setup</p>
+          <h2>Prepare the auth and safety rails before a trader ever sees the dashboard.</h2>
           <p className="lede">
-            The onboarding route uses the same luminous visual system, but shifts the emphasis to
-            protected setup, simulation-first decisions, and clear risk approvals before any live
-            trading begins.
+            Oscar is designed for a simulation-first rollout: LINE Login at the front door, paper
+            trading inside the dashboard, and backtests as the final check before anything live.
           </p>
-        </div>
-        <div className="phone-wall onboarding-wall" aria-label="Onboarding preview screens">
-          <SetupPhone />
-          <SwapPhone />
         </div>
       </section>
 
-      <div className="feature-grid">
+      <section className="content-grid">
         {steps.map((step, index) => (
           <article className="feature-card" key={step}>
             <p className="eyebrow">Step {index + 1}</p>
             <h3>{step}</h3>
           </article>
         ))}
-      </div>
+      </section>
     </div>
   )
 }

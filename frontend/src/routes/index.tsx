@@ -1,63 +1,138 @@
-import { createFileRoute } from '@tanstack/react-router'
-import { MarketPhone, StatsPhone, SwapPhone } from '../components/showcase'
+import { useState } from 'react'
+import { Link, createFileRoute } from '@tanstack/react-router'
+import { beginLineLogin } from '../lib/session'
+import { Route as RootRoute } from './__root'
 
-const featureCards = [
+const launchStats = [
+  { label: 'Paper capital', value: '$15,000', hint: 'Simulation-only bankroll' },
+  { label: 'Tracked bots', value: '3', hint: 'Grid, rebalance, infinity grid' },
+  { label: 'Latest backtest', value: '180 days', hint: 'Rolling BTC regime replay' },
+]
+
+const highlights = [
   {
-    title: 'Market surfaces',
-    body: 'Overview, wallet, swap, and stat states are styled as collectible mobile screens instead of flat admin panels.',
+    title: 'LINE sign-in first',
+    body: 'Operators enter with LINE Login, then land directly in the control room with a persisted session.',
   },
   {
-    title: 'Soft-risk framing',
-    body: 'The UI keeps premium polish while still hinting at the safety rails that matter for a live trading product.',
+    title: 'Paper trading launchpad',
+    body: 'Run the bot in simulation mode before going near exchange keys or live capital.',
   },
   {
-    title: 'Route continuity',
-    body: 'Every route now feels like part of one trading ecosystem rather than a placeholder set of disconnected cards.',
+    title: 'Backtesting on demand',
+    body: 'Replay strategy performance and compare return, drawdown, and trade quality from one dashboard.',
   },
 ]
 
 export const Route = createFileRoute('/')({
-  component: OverviewPage,
+  validateSearch: (search) => ({
+    authError: typeof search.authError === 'string' ? search.authError : undefined,
+  }),
+  component: HomePage,
 })
 
-function OverviewPage() {
+function HomePage() {
+  const viewer = RootRoute.useLoaderData()
+  const search = Route.useSearch()
+  const [isStartingLogin, setIsStartingLogin] = useState(false)
+  const [localError, setLocalError] = useState<string>()
+  const authError = search.authError || localError
+  const heroCopy = viewer.authenticated
+    ? `Welcome back, ${viewer.user?.displayName}. Your dashboard is ready with paper trading controls and the latest bot health snapshot.`
+    : 'Sign in with LINE to unlock the trading dashboard, launch paper trading, and run backtests with the latest bot metrics.'
+
+  async function handleLineLogin() {
+    try {
+      setIsStartingLogin(true)
+      setLocalError(undefined)
+      const result = await beginLineLogin({ data: { intendedPath: '/dashboard' } })
+
+      if (result.mode === 'oauth') {
+        window.location.assign(result.authorizeUrl)
+        return
+      }
+
+      window.location.assign(result.redirectTo)
+    } catch (error) {
+      setLocalError(
+        error instanceof Error ? error.message : 'Unable to start LINE Login right now.',
+      )
+      setIsStartingLogin(false)
+    }
+  }
+
   return (
     <div className="page">
-      <section className="showcase-grid">
-        <div className="showcase-copy">
-          <p className="eyebrow">Overview</p>
-          <h2>Trading bot software, reframed like a premium mobile exchange launch.</h2>
-          <p className="lede">
-            The redesign takes the existing Oscar routes and gives them the soft, luminous trading
-            aesthetic from the reference: floating phone canvases, bright white glass, and calm
-            violet accents that make the product feel collectible instead of utilitarian.
-          </p>
-          <div className="metric-band">
-            <div className="metric-tile">
-              <span>Primary pair</span>
-              <strong>BTC / SOL / USDC</strong>
-            </div>
-            <div className="metric-tile">
-              <span>Visual mode</span>
-              <strong>Pastel glass UI</strong>
-            </div>
-            <div className="metric-tile">
-              <span>Readiness</span>
-              <strong>Prototype frontends live</strong>
-            </div>
+      <section className="hero-grid">
+        <div className="hero-copy">
+          <p className="eyebrow">Access Layer</p>
+          <h2>Run Oscar from one dashboard after a LINE Login handoff.</h2>
+          <p className="lede">{heroCopy}</p>
+          {authError ? <p className="inline-alert">{authError}</p> : null}
+          {!viewer.lineConfigured && !viewer.authenticated ? (
+            <p className="inline-note">
+              Demo auth is active because `LINE_CHANNEL_ID` and `LINE_CHANNEL_SECRET` are not set
+              yet. Add them to switch this button to the live LINE OAuth flow.
+            </p>
+          ) : null}
+          <div className="hero-actions">
+            {viewer.authenticated ? (
+              <Link className="primary-link" to="/dashboard">
+                Open dashboard
+              </Link>
+            ) : (
+              <button
+                type="button"
+                className="primary-button"
+                onClick={() => {
+                  void handleLineLogin()
+                }}
+                disabled={isStartingLogin}
+              >
+                {isStartingLogin ? 'Connecting to LINE...' : 'Continue with LINE'}
+              </button>
+            )}
+            <Link className="secondary-link" to="/onboarding">
+              Review setup steps
+            </Link>
           </div>
         </div>
-        <div className="phone-wall overview-wall" aria-label="Mobile trading dashboard showcase">
-          <MarketPhone />
-          <StatsPhone />
-          <SwapPhone />
-        </div>
+
+        <aside className="hero-panel">
+          <div className="hero-panel-head">
+            <p className="eyebrow">Dashboard Preview</p>
+            <strong>Bot operations at a glance</strong>
+          </div>
+          <div className="stat-grid">
+            {launchStats.map((item) => (
+              <article className="stat-card" key={item.label}>
+                <span>{item.label}</span>
+                <strong>{item.value}</strong>
+                <small>{item.hint}</small>
+              </article>
+            ))}
+          </div>
+          <div className="preview-stack">
+            <div className="preview-row">
+              <span>Paper engine</span>
+              <strong>Ready to launch</strong>
+            </div>
+            <div className="preview-row">
+              <span>Backtest health</span>
+              <strong>ROI 18.6% / Max DD 7.4%</strong>
+            </div>
+            <div className="preview-row">
+              <span>Best bot</span>
+              <strong>Infinity Grid in trend regime</strong>
+            </div>
+          </div>
+        </aside>
       </section>
 
-      <section className="feature-grid">
-        {featureCards.map((item) => (
+      <section className="content-grid">
+        {highlights.map((item) => (
           <article className="feature-card" key={item.title}>
-            <p className="eyebrow">Design shift</p>
+            <p className="eyebrow">Feature</p>
             <h3>{item.title}</h3>
             <p>{item.body}</p>
           </article>
