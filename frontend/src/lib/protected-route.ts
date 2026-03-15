@@ -11,7 +11,7 @@ export const protectedNavigationItems: Array<{
 }> = [
   { id: 'dashboard', label: 'Dashboard', icon: 'solar:widget-5-linear', to: '/dashboard' },
   { id: 'bots', label: 'Active Bots', icon: 'solar:cpu-linear', to: '/bots' },
-  { id: 'backtest', label: 'Backtesting', icon: 'solar:chart-square-linear' },
+  { id: 'backtest', label: 'Backtesting', icon: 'solar:chart-square-linear', to: '/backtest' },
   { id: 'history', label: 'Trade History', icon: 'solar:history-linear', to: '/history' },
   { id: 'ai', label: 'AI Research', icon: 'solar:stars-line-duotone', to: '/ai' },
 ]
@@ -26,7 +26,7 @@ export const protectedSystemItems = [
   { id: 'settings', label: 'Settings', icon: 'solar:settings-linear', to: '/onboarding' },
 ]
 
-const protectedRoutePaths = new Set(['/dashboard', '/history', '/bots', '/ai'])
+const protectedRoutePaths = new Set(['/dashboard', '/backtest', '/history', '/bots', '/ai'])
 
 export function isProtectedPathname(pathname: string) {
   return protectedRoutePaths.has(pathname)

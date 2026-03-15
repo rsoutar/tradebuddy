@@ -78,6 +78,16 @@ class BinanceSpotWebSocketMarketData:
     def last_error(self) -> Optional[str]:
         return self._last_error
 
+    def connection_status(self) -> dict[str, Any]:
+        return {
+            "transport": "wss",
+            "healthy": self._latest_snapshot is not None and not self._stop_event.is_set(),
+            "connected_streams": 1 if self._latest_snapshot is not None else 0,
+            "configured_streams": 1,
+            "source": "binance-spot-websocket",
+            "lastError": self._last_error,
+        }
+
     def _run_forever(self) -> None:
         stream_url = f"{self._websocket_url}/stream?streams={self._stream_symbol}@ticker"
 

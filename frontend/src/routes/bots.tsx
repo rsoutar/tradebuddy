@@ -1,8 +1,9 @@
 import { Icon } from '@iconify/react'
 import { Link, createFileRoute } from '@tanstack/react-router'
+import { MarketConnectionBadge } from '../components/market-connection-badge'
 import { ProtectedMenuButton, ProtectedShell } from '../components/protected-shell'
 import { requireAuthenticatedViewer } from '../lib/protected-route'
-import { getBotActivity } from '../lib/session'
+import { getBotActivity, getConnectionStatus } from '../lib/session'
 import type { BotActivityState, BotRun, StrategyKey } from '../lib/session'
 import { Route as RootRoute } from './__root'
 
@@ -54,7 +55,10 @@ export const Route = createFileRoute('/bots')({
   staleTime: 60_000,
   preloadStaleTime: 60_000,
   shouldReload: false,
-  loader: () => getBotActivity(),
+  loader: async () => ({
+    activity: await getBotActivity(),
+    connection: await getConnectionStatus(),
+  }),
   component: BotsPage,
 })
 
@@ -176,7 +180,11 @@ function BotCard({
 
 function BotsPage() {
   const viewer = RootRoute.useLoaderData()
-  const activity = Route.useLoaderData() as BotActivityState
+  const loaderData = Route.useLoaderData() as {
+    activity: BotActivityState
+    connection: Awaited<ReturnType<typeof getConnectionStatus>>
+  }
+  const activity = loaderData.activity
   const hasActiveBots = activity.activeBots.length > 0
 
   return (
@@ -192,10 +200,10 @@ function BotsPage() {
               <h1 className="text-lg font-medium tracking-tight text-zinc-100">Active Bots</h1>
             </div>
           </div>
-          <div className="hidden items-center gap-2 rounded-full border border-sky-900/30 bg-sky-900/10 px-3 py-1.5 text-xs text-sky-400 sm:flex">
-            <span className="h-1.5 w-1.5 rounded-full bg-sky-400" />
-            Bot lifecycle
-          </div>
+          <MarketConnectionBadge
+            connection={loaderData.connection.connection}
+            market={loaderData.connection.market}
+          />
         </>
       )}
     >

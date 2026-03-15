@@ -2,9 +2,10 @@ import { useMemo, useState } from 'react'
 import type { FormEvent, ReactNode } from 'react'
 import { Link, createFileRoute } from '@tanstack/react-router'
 import { Icon } from '@iconify/react'
+import { MarketConnectionBadge } from '../components/market-connection-badge'
 import { ProtectedMenuButton, ProtectedShell } from '../components/protected-shell'
 import { requireAuthenticatedViewer } from '../lib/protected-route'
-import type { DashboardState, StrategyKey } from '../lib/session'
+import type { DashboardState, MarketConnectionState, MarketState, StrategyKey } from '../lib/session'
 import { createBot, depositPaperFunds, getDashboard } from '../lib/session'
 
 const strategyLabels: Record<StrategyKey, string> = {
@@ -220,6 +221,8 @@ function MetricCard({
 function DashboardPage() {
   const loaderData = Route.useLoaderData()
   const [dashboard, setDashboard] = useState<DashboardState>(loaderData.dashboard)
+  const [market, setMarket] = useState<MarketState>(loaderData.market)
+  const [connection, setConnection] = useState<MarketConnectionState>(loaderData.connection)
   const [isRefreshing, setIsRefreshing] = useState(false)
   const [isDepositModalOpen, setIsDepositModalOpen] = useState(false)
   const [isCreateBotModalOpen, setIsCreateBotModalOpen] = useState(false)
@@ -313,6 +316,8 @@ function DashboardPage() {
       setIsRefreshing(true)
       const nextDashboard = await getDashboard()
       setDashboard(nextDashboard.dashboard)
+      setMarket(nextDashboard.market)
+      setConnection(nextDashboard.connection)
     } catch (error) {
       setActionError(error instanceof Error ? error.message : 'Unable to refresh the dashboard.')
     } finally {
@@ -434,27 +439,10 @@ function DashboardPage() {
               <h1 className="hidden text-lg font-medium tracking-tight text-zinc-100 sm:block">
                 Overview
               </h1>
-              <div className="hidden items-center rounded-md border border-zinc-800 bg-zinc-900 p-0.5 sm:flex">
-                <button
-                  className="rounded px-3 py-1 text-xs font-normal text-zinc-400 transition-colors hover:text-zinc-200"
-                  type="button"
-                >
-                  Testnet
-                </button>
-                <button
-                  className="rounded border border-zinc-700/50 bg-zinc-800 px-3 py-1 text-xs font-normal text-zinc-100 shadow-sm"
-                  type="button"
-                >
-                  Live
-                </button>
-              </div>
             </div>
 
             <div className="flex items-center gap-4">
-              <div className="hidden items-center gap-2 rounded-full border border-emerald-900/30 bg-emerald-900/10 px-3 py-1.5 text-xs font-normal text-emerald-500 sm:flex">
-                <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-emerald-500" />
-                Binance API Connected
-              </div>
+              <MarketConnectionBadge connection={connection} market={market} />
               <button className="relative p-1 text-zinc-400 transition-colors hover:text-zinc-100" type="button">
                 <Icon icon="solar:bell-linear" width={20} height={20} />
                 {alertCount > 0 ? (

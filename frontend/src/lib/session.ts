@@ -28,6 +28,24 @@ export type BotMetric = {
   lastSignal: string
 }
 
+export type MarketState = {
+  symbol: string
+  price: number
+  change_24h_pct: number
+  volume_24h: number
+  volatility_24h_pct: number
+  trend: string
+}
+
+export type MarketConnectionState = {
+  transport: 'wss' | 'rest'
+  healthy: boolean
+  connected_streams: number
+  configured_streams: number
+  source: string
+  lastError?: string | null
+}
+
 export type ActiveStrategy = {
   id: string
   name: string
@@ -122,6 +140,26 @@ export type BacktestSummary = {
   trades: number
   annualizedPct: number
   completedAt: string
+  startedAt?: string
+  startEquityUsd?: number
+  finalEquityUsd?: number
+  feeRate?: number
+  slippageRate?: number
+  stopLossTriggered?: boolean
+  warnings?: string[]
+  tradeLog?: BacktestTradeRecord[]
+}
+
+export type BacktestTradeRecord = {
+  timestamp: string
+  side: 'buy' | 'sell'
+  level: number
+  execution_price: number
+  amount: number
+  notional_usd: number
+  fee_usd: number
+  realized_pnl_usd?: number | null
+  reason: string
 }
 
 export type ActivityEvent = {
@@ -151,6 +189,16 @@ export type GridBotInput = {
   spacingPct: number
   stopLossEnabled: boolean
   stopLossPct?: number
+}
+
+export type BacktestInput = {
+  strategy: StrategyKey
+  startAt?: string
+  endAt?: string
+  initialCapitalUsd?: number
+  feeRate?: number
+  slippageRate?: number
+  gridConfig?: GridBotInput
 }
 
 type SessionData = {
@@ -248,11 +296,25 @@ async function createPkcePair() {
 }
 
 type BackendDashboardEnvelope = {
+  generatedAt?: string
+  status?: {
+    environment: string
+    symbol: string
+    exchange: string
+    ai_enabled: boolean
+    simulation_ready: boolean
+  }
+  market: MarketState
+  connection: MarketConnectionState
   dashboard: DashboardState
 }
 
 type BackendTradeHistoryEnvelope = TradeHistoryState
 type BackendBotActivityEnvelope = BotActivityState
+type BackendConnectionEnvelope = {
+  market: MarketState
+  connection: MarketConnectionState
+}
 
 function getBackendApiBaseUrl() {
   return process.env.VITE_API_BASE_URL ?? 'http://127.0.0.1:8000'
@@ -465,8 +527,25 @@ export const getDashboard = createServerFn({ method: 'GET' }).handler(async () =
 
   return {
     viewer: session.data.user,
+    market: payload.market,
+    connection: payload.connection,
     dashboard: payload.dashboard,
   }
+})
+
+export const getConnectionStatus = createServerFn({ method: 'GET' }).handler(async () => {
+  const session = await useSession<SessionData>(getSessionConfig())
+
+  if (!session.data.user) {
+    throw new Error('You need to sign in before opening connection status.')
+  }
+
+  const payload = await fetchDashboardForUser(session.data.user)
+
+  return {
+    market: payload.market,
+    connection: payload.connection,
+  } satisfies BackendConnectionEnvelope
 })
 
 export const getTradeHistory = createServerFn({ method: 'GET' }).handler(async () => {
@@ -525,7 +604,7 @@ export const runPaperTrading = createServerFn({ method: 'POST' }).handler(
 
 export const runBacktest = createServerFn({ method: 'POST' }).handler(
   async ({ data }) => {
-    const input = (data ?? {}) as { strategy: StrategyKey }
+    const input = (data ?? {}) as BacktestInput
     const session = await useSession<SessionData>(getSessionConfig())
 
     if (!session.data.user) {
@@ -540,6 +619,21 @@ export const runBacktest = createServerFn({ method: 'POST' }).handler(
         },
         body: JSON.stringify({
           strategy: input.strategy,
+          start_at: input.startAt,
+          end_at: input.endAt,
+          initial_capital_usd: input.initialCapitalUsd,
+          fee_rate: input.feeRate,
+          slippage_rate: input.slippageRate,
+          grid_config: input.gridConfig
+            ? {
+                lower_price: input.gridConfig.lowerPrice,
+                upper_price: input.gridConfig.upperPrice,
+                grid_count: input.gridConfig.gridCount,
+                spacing_pct: input.gridConfig.spacingPct,
+                stop_loss_enabled: input.gridConfig.stopLossEnabled,
+                stop_loss_pct: input.gridConfig.stopLossPct,
+              }
+            : undefined,
           ...getUserScope(session.data.user),
         }),
       },

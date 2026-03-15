@@ -6,16 +6,35 @@ from fastapi.testclient import TestClient
 
 from trading_bot.api import create_api
 from trading_bot.app import TradingBotApp
+from trading_bot.services.historical_data import BinanceHistoricalKlineLoader
 from trading_bot.settings import load_settings
 
 
-def build_client(monkeypatch, tmp_path) -> TestClient:
+def write_history_archive(base_dir, name: str, rows: list[list[str]]) -> None:
+    from zipfile import ZipFile
+
+    target_dir = base_dir / "BTCUSDT" / "15m"
+    target_dir.mkdir(parents=True, exist_ok=True)
+    archive_path = target_dir / name
+    csv_name = name.replace(".zip", ".csv")
+    csv_payload = "\n".join(",".join(row) for row in rows)
+    with ZipFile(archive_path, "w") as archive:
+        archive.writestr(csv_name, csv_payload)
+
+
+def build_client(monkeypatch, tmp_path, historical_loader=None) -> TestClient:
     monkeypatch.delenv("TRADING_BOT_EXCHANGE_API_KEY", raising=False)
     monkeypatch.delenv("TRADING_BOT_EXCHANGE_API_SECRET", raising=False)
     monkeypatch.delenv("TRADING_BOT_API_CORS_ORIGINS", raising=False)
     monkeypatch.setenv("TRADING_BOT_MARKETDATA_WS_ENABLED", "false")
     monkeypatch.setenv("TRADING_BOT_STATE_DIR", str(tmp_path / "state"))
-    app = create_api(TradingBotApp(load_settings(), worker_autostart=False))
+    app = create_api(
+        TradingBotApp(
+            load_settings(),
+            worker_autostart=False,
+            historical_loader=historical_loader,
+        )
+    )
     return TestClient(app)
 
 
@@ -31,6 +50,8 @@ def test_dashboard_endpoint_returns_dashboard_payload(monkeypatch, tmp_path) -> 
     payload = response.json()
     assert payload["status"]["exchange"] == "binance"
     assert payload["market"]["symbol"] == "BTC/USDT"
+    assert payload["connection"]["transport"] == "rest"
+    assert payload["connection"]["configured_streams"] == 0
     assert payload["dashboard"]["activeStrategy"] == "grid"
     assert payload["dashboard"]["botStatus"] == "idle"
     assert payload["dashboard"]["capitalUsd"] == 100.0
@@ -88,6 +109,137 @@ def test_backtest_endpoint_returns_latest_summary(monkeypatch, tmp_path) -> None
     assert summary["strategy"] == "infinity-grid"
     assert summary["periodLabel"] == "Last 90 days"
     assert summary["trades"] >= 8
+
+
+def test_grid_backtest_endpoint_replays_historical_candles(monkeypatch, tmp_path) -> None:
+    history_dir = tmp_path / "history"
+    write_history_archive(
+        history_dir,
+        "BTCUSDT-15m-2024-01.zip",
+        [
+            [
+                "1704067200000",
+                "100.0",
+                "111.0",
+                "89.0",
+                "105.0",
+                "100.0",
+                "1704068099999",
+                "10000.0",
+                "100",
+                "50.0",
+                "5000.0",
+                "0",
+            ],
+            [
+                "1704068100000",
+                "105.0",
+                "112.0",
+                "94.0",
+                "110.0",
+                "100.0",
+                "1704068999999",
+                "10000.0",
+                "100",
+                "50.0",
+                "5000.0",
+                "0",
+            ],
+        ],
+    )
+    client = build_client(
+        monkeypatch,
+        tmp_path,
+        historical_loader=BinanceHistoricalKlineLoader(data_dir=history_dir),
+    )
+
+    response = client.post(
+        "/api/backtests/run",
+        json={"strategy": "grid", "user_id": "user-123", "user_name": "Test Trader"},
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    summary = payload["dashboard"]["lastBacktest"]
+    assert summary is not None
+    assert summary["strategy"] == "grid"
+    assert summary["trades"] >= 2
+    assert summary["periodLabel"] == "2024-01-01 to 2024-01-01"
+    assert summary["finalEquityUsd"] > summary["startEquityUsd"]
+
+
+def test_grid_backtest_endpoint_accepts_custom_parameters(monkeypatch, tmp_path) -> None:
+    history_dir = tmp_path / "history"
+    write_history_archive(
+        history_dir,
+        "BTCUSDT-15m-2024-01.zip",
+        [
+            [
+                "1704067200000",
+                "100.0",
+                "111.0",
+                "89.0",
+                "105.0",
+                "100.0",
+                "1704068099999",
+                "10000.0",
+                "100",
+                "50.0",
+                "5000.0",
+                "0",
+            ],
+            [
+                "1704068100000",
+                "105.0",
+                "112.0",
+                "94.0",
+                "110.0",
+                "100.0",
+                "1704068999999",
+                "10000.0",
+                "100",
+                "50.0",
+                "5000.0",
+                "0",
+            ],
+        ],
+    )
+    client = build_client(
+        monkeypatch,
+        tmp_path,
+        historical_loader=BinanceHistoricalKlineLoader(data_dir=history_dir),
+    )
+
+    response = client.post(
+        "/api/backtests/run",
+        json={
+            "strategy": "grid",
+            "user_id": "user-123",
+            "user_name": "Test Trader",
+            "start_at": "2024-01-01T00:00:00+00:00",
+            "end_at": "2024-01-01T00:30:00+00:00",
+            "initial_capital_usd": 250,
+            "fee_rate": 0.0,
+            "slippage_rate": 0.0,
+            "grid_config": {
+                "lower_price": 90,
+                "upper_price": 110,
+                "grid_count": 3,
+                "spacing_pct": 10,
+                "stop_loss_enabled": True,
+                "stop_loss_pct": 5,
+            },
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    summary = payload["dashboard"]["lastBacktest"]
+    assert summary is not None
+    assert summary["startEquityUsd"] == 250.0
+    assert summary["feeRate"] == 0.0
+    assert summary["slippageRate"] == 0.0
+    assert summary["trades"] >= 2
 
 
 def test_create_bot_persists_active_strategy_and_trades(monkeypatch, tmp_path) -> None:

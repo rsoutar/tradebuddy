@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import json
+import os
+import threading
 import time
 from dataclasses import asdict
 from pathlib import Path
@@ -48,14 +50,20 @@ class SharedSnapshotFileMarketData:
 
 def write_shared_snapshot(snapshot_path: Path, snapshot: MarketSnapshot) -> None:
     snapshot_path.parent.mkdir(parents=True, exist_ok=True)
-    temp_path = snapshot_path.with_suffix(".tmp")
+    temp_path = snapshot_path.with_name(
+        f"{snapshot_path.stem}.{os.getpid()}.{threading.get_ident()}.tmp"
+    )
     payload = {
         "written_at": time.time(),
         "symbol": snapshot.symbol,
         "snapshot": asdict(snapshot),
     }
-    temp_path.write_text(json.dumps(payload))
-    temp_path.replace(snapshot_path)
+    try:
+        temp_path.write_text(json.dumps(payload))
+        temp_path.replace(snapshot_path)
+    finally:
+        if temp_path.exists():
+            temp_path.unlink(missing_ok=True)
 
 
 class MarketDataService:

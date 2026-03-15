@@ -17,7 +17,9 @@ from trading_bot.models import (
 )
 from trading_bot.paper_store import PaperTradingStore
 from trading_bot.runtime import BotProcessManager
+from trading_bot.services.backtesting import GridBacktestRunner
 from trading_bot.services.exchange import CcxtExchangeClient, MockExchangeClient
+from trading_bot.services.historical_data import BinanceHistoricalKlineLoader
 from trading_bot.services.binance_ws import BinanceSpotWebSocketMarketData
 from trading_bot.services.market_data import MarketDataService, SharedSnapshotFileMarketData
 from trading_bot.services.risk import RiskManager
@@ -34,6 +36,7 @@ class TradingBotApp:
         *,
         enable_market_stream: bool = True,
         worker_autostart: bool = True,
+        historical_loader: Optional[BinanceHistoricalKlineLoader] = None,
     ) -> None:
         self.settings = settings
         self._enable_market_stream = enable_market_stream
@@ -46,6 +49,8 @@ class TradingBotApp:
         )
         self.paper_store = PaperTradingStore(settings.runtime.state_dir / "paper_trading.sqlite3")
         self.risk_manager = RiskManager()
+        self.historical_loader = historical_loader or BinanceHistoricalKlineLoader()
+        self.grid_backtest_runner = GridBacktestRunner(self.historical_loader)
         self.process_manager = BotProcessManager(
             settings,
             self.paper_store,
@@ -59,6 +64,20 @@ class TradingBotApp:
 
     def _shared_snapshot_path(self) -> Path:
         return self.settings.runtime.state_dir / "market_snapshot.json"
+
+    def _market_connection_summary(self) -> dict[str, Any]:
+        stream = getattr(self.market_data, "_market_stream", None)
+        if isinstance(stream, BinanceSpotWebSocketMarketData):
+            return stream.connection_status()
+
+        return {
+            "transport": "wss" if self.settings.market_data.websocket_enabled else "rest",
+            "healthy": stream is not None,
+            "connected_streams": 0,
+            "configured_streams": 1 if self.settings.market_data.websocket_enabled else 0,
+            "source": "snapshot-file-fallback" if stream is not None else "exchange-rest",
+            "lastError": None,
+        }
 
     def _create_market_stream(self):
         if not self._enable_market_stream:
@@ -90,6 +109,13 @@ class TradingBotApp:
 
     def _timestamp(self) -> str:
         return self._utcnow().isoformat()
+
+    def _normalize_datetime(self, value: Optional[datetime]) -> Optional[datetime]:
+        if value is None:
+            return None
+        if value.tzinfo is None:
+            return value.replace(tzinfo=timezone.utc)
+        return value.astimezone(timezone.utc)
 
     def _reconcile_user_bots(self, user_id: str) -> None:
         for bot in self.paper_store.list_bot_instances(user_id=user_id):
@@ -462,6 +488,7 @@ class TradingBotApp:
             "generatedAt": self._timestamp(),
             "status": asdict(self.status()),
             "market": asdict(snapshot),
+            "connection": self._market_connection_summary(),
             "balances": [asdict(balance) for balance in balances],
             "dashboard": {
                 "capitalUsd": self._capital_usd(balances, snapshot),
@@ -509,6 +536,12 @@ class TradingBotApp:
         strategy_type: StrategyType,
         user_id: str = "demo-user",
         user_name: str = "Demo Trader",
+        grid_config: Optional[dict[str, Any]] = None,
+        start_at: Optional[datetime] = None,
+        end_at: Optional[datetime] = None,
+        initial_capital_usd: Optional[float] = None,
+        fee_rate: Optional[float] = None,
+        slippage_rate: Optional[float] = None,
     ) -> dict[str, Any]:
         snapshot = self.market_data.get_snapshot(self.settings.runtime.symbol)
         account_state = self.paper_store.ensure_account(
@@ -516,38 +549,87 @@ class TradingBotApp:
             user_name=user_name,
             timestamp=self._timestamp(),
         )
-        balances = self._paper_balances(account_state)
-        evaluation_data = self._evaluate_strategy(strategy_type, snapshot, balances)
-        evaluation = evaluation_data["evaluation"]
-        risk = evaluation_data["risk"]
         completed_at = self._timestamp()
-
-        roi_pct = round(
-            (snapshot.change_24h_pct * 4.2)
-            + (len(evaluation.orders) * 0.35)
-            - ((len(evaluation.warnings) + len(risk.warnings)) * 0.9),
-            2,
-        )
-        max_drawdown_pct = round(max(1.0, snapshot.volatility_24h_pct * 2.1), 2)
-        trades = max(len(evaluation.orders) * 12, 8)
-        last_backtest = {
-            "strategy": strategy_type.value,
-            "periodLabel": "Last 90 days",
-            "roiPct": roi_pct,
-            "maxDrawdownPct": max_drawdown_pct,
-            "profitFactor": round(max(1.0, 1.1 + (len(evaluation.orders) * 0.08)), 2),
-            "winRatePct": round(max(40.0, 57.5 + (len(evaluation.orders) * 0.7)), 1),
-            "trades": trades,
-            "annualizedPct": round(roi_pct * 1.35, 2),
-            "completedAt": completed_at,
-        }
+        if strategy_type is StrategyType.GRID:
+            runner = GridBacktestRunner(
+                self.historical_loader,
+                fee_rate=fee_rate if fee_rate is not None else self.grid_backtest_runner._fee_rate,
+                slippage_rate=(
+                    slippage_rate
+                    if slippage_rate is not None
+                    else self.grid_backtest_runner._slippage_rate
+                ),
+            )
+            normalized_start = self._normalize_datetime(start_at)
+            normalized_end = self._normalize_datetime(end_at)
+            if normalized_start is None or normalized_end is None:
+                normalized_start, normalized_end = runner.default_window()
+            window_candles = self.historical_loader.load_candles(
+                start=normalized_start,
+                end=normalized_end,
+            )
+            if not window_candles:
+                raise ValueError("No historical candles available for the requested backtest window.")
+            initial_snapshot = MarketSnapshot(
+                symbol=self.settings.runtime.symbol,
+                price=window_candles[0].open,
+                change_24h_pct=0.0,
+                volume_24h=0.0,
+                volatility_24h_pct=0.0,
+                trend="historical-replay",
+            )
+            config = self._resolve_strategy_config(
+                strategy_type,
+                initial_snapshot,
+                self._grid_config_from_payload(grid_config),
+            )
+            if not isinstance(config, GridBotConfig):
+                raise ValueError("Grid backtest requires a grid configuration.")
+            backtest = runner.run(
+                config,
+                initial_capital_usd=(
+                    round(initial_capital_usd, 2)
+                    if initial_capital_usd is not None
+                    else max(account_state["usd_balance"], 100.0)
+                ),
+                start=normalized_start,
+                end=normalized_end,
+                completed_at=datetime.fromisoformat(completed_at),
+            )
+            last_backtest = backtest.to_summary()
+            tone = "warning" if backtest.stop_loss_triggered else "neutral"
+        else:
+            balances = self._paper_balances(account_state)
+            evaluation_data = self._evaluate_strategy(strategy_type, snapshot, balances)
+            evaluation = evaluation_data["evaluation"]
+            risk = evaluation_data["risk"]
+            roi_pct = round(
+                (snapshot.change_24h_pct * 4.2)
+                + (len(evaluation.orders) * 0.35)
+                - ((len(evaluation.warnings) + len(risk.warnings)) * 0.9),
+                2,
+            )
+            max_drawdown_pct = round(max(1.0, snapshot.volatility_24h_pct * 2.1), 2)
+            trades = max(len(evaluation.orders) * 12, 8)
+            last_backtest = {
+                "strategy": strategy_type.value,
+                "periodLabel": "Last 90 days",
+                "roiPct": roi_pct,
+                "maxDrawdownPct": max_drawdown_pct,
+                "profitFactor": round(max(1.0, 1.1 + (len(evaluation.orders) * 0.08)), 2),
+                "winRatePct": round(max(40.0, 57.5 + (len(evaluation.orders) * 0.7)), 1),
+                "trades": trades,
+                "annualizedPct": round(roi_pct * 1.35, 2),
+                "completedAt": completed_at,
+            }
+            tone = "neutral" if risk.accepted else "warning"
         self.paper_store.record_backtest(
             user_id=user_id,
             user_name=user_name,
             strategy=strategy_type.value,
             strategy_label=self._strategy_label(strategy_type),
             backtest_summary=last_backtest,
-            tone="neutral" if risk.accepted else "warning",
+            tone=tone,
             timestamp=completed_at,
         )
         return self.dashboard(user_id=user_id, user_name=user_name)

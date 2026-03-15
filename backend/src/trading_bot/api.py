@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import asdict
+from datetime import datetime
 from typing import Optional
 
 from fastapi import FastAPI, HTTPException, Query
@@ -33,6 +34,16 @@ class GridConfigRequest(BaseModel):
 class CreateBotRequest(UserScopedRequest):
     strategy: StrategyType
     grid_config: Optional[GridConfigRequest] = None
+
+
+class BacktestRequest(UserScopedRequest):
+    strategy: StrategyType
+    grid_config: Optional[GridConfigRequest] = None
+    start_at: Optional[datetime] = None
+    end_at: Optional[datetime] = None
+    initial_capital_usd: Optional[float] = Field(default=None, gt=0)
+    fee_rate: Optional[float] = Field(default=None, ge=0)
+    slippage_rate: Optional[float] = Field(default=None, ge=0)
 
 
 class DepositRequest(UserScopedRequest):
@@ -142,12 +153,21 @@ def create_api(trading_app: Optional[TradingBotApp] = None) -> FastAPI:
             raise HTTPException(status_code=400, detail=str(error)) from error
 
     @api.post("/api/backtests/run")
-    def run_backtest(payload: StrategyActionRequest) -> dict:
-        return app_state.run_backtest(
-            payload.strategy,
-            user_id=payload.user_id,
-            user_name=payload.user_name,
-        )
+    def run_backtest(payload: BacktestRequest) -> dict:
+        try:
+            return app_state.run_backtest(
+                payload.strategy,
+                user_id=payload.user_id,
+                user_name=payload.user_name,
+                grid_config=payload.grid_config.model_dump() if payload.grid_config else None,
+                start_at=payload.start_at,
+                end_at=payload.end_at,
+                initial_capital_usd=payload.initial_capital_usd,
+                fee_rate=payload.fee_rate,
+                slippage_rate=payload.slippage_rate,
+            )
+        except ValueError as error:
+            raise HTTPException(status_code=400, detail=str(error)) from error
 
     @api.post("/api/paper-trading/deposits")
     def deposit_paper_funds(payload: DepositRequest) -> dict:

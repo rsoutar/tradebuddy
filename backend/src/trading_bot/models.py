@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from datetime import datetime
 from enum import Enum
 from typing import Optional
 
@@ -36,6 +37,23 @@ class MarketSnapshot:
     volume_24h: float
     volatility_24h_pct: float
     trend: str
+
+
+@dataclass(frozen=True)
+class HistoricalCandle:
+    symbol: str
+    interval: str
+    open_time: datetime
+    close_time: datetime
+    open: float
+    high: float
+    low: float
+    close: float
+    volume: float
+    quote_volume: float
+    trade_count: int
+    taker_buy_base_volume: float
+    taker_buy_quote_volume: float
 
 
 @dataclass(frozen=True)

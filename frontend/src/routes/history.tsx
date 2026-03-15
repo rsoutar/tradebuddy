@@ -1,9 +1,10 @@
 import { useMemo, useState } from 'react'
 import { Icon } from '@iconify/react'
 import { createFileRoute } from '@tanstack/react-router'
+import { MarketConnectionBadge } from '../components/market-connection-badge'
 import { ProtectedMenuButton, ProtectedShell } from '../components/protected-shell'
 import { requireAuthenticatedViewer } from '../lib/protected-route'
-import { getTradeHistory } from '../lib/session'
+import { getConnectionStatus, getTradeHistory } from '../lib/session'
 import type { PaperTrade, StrategyKey, TradeHistoryState } from '../lib/session'
 import { Route as RootRoute } from './__root'
 
@@ -28,7 +29,10 @@ export const Route = createFileRoute('/history')({
   staleTime: 60_000,
   preloadStaleTime: 60_000,
   shouldReload: false,
-  loader: () => getTradeHistory(),
+  loader: async () => ({
+    history: await getTradeHistory(),
+    connection: await getConnectionStatus(),
+  }),
   component: TradeHistoryPage,
 })
 
@@ -121,7 +125,11 @@ function SummaryCard({
 }
 
 function TradeHistoryPage() {
-  const history = Route.useLoaderData() as TradeHistoryState
+  const loaderData = Route.useLoaderData() as {
+    history: TradeHistoryState
+    connection: Awaited<ReturnType<typeof getConnectionStatus>>
+  }
+  const history = loaderData.history
   const viewer = RootRoute.useLoaderData()
   const [searchValue, setSearchValue] = useState('')
   const [strategyFilter, setStrategyFilter] = useState<'all' | StrategyKey>('all')
@@ -166,10 +174,10 @@ function TradeHistoryPage() {
               </h1>
             </div>
           </div>
-          <div className="hidden items-center gap-2 rounded-full border border-emerald-900/30 bg-emerald-900/10 px-3 py-1.5 text-xs text-emerald-500 sm:flex">
-            <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />
-            SQLite-backed ledger
-          </div>
+          <MarketConnectionBadge
+            connection={loaderData.connection.connection}
+            market={loaderData.connection.market}
+          />
         </>
       )}
     >

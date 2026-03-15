@@ -1,7 +1,9 @@
 import { Icon } from '@iconify/react'
 import { createFileRoute } from '@tanstack/react-router'
+import { MarketConnectionBadge } from '../components/market-connection-badge'
 import { ProtectedMenuButton, ProtectedShell } from '../components/protected-shell'
 import { requireAuthenticatedViewer } from '../lib/protected-route'
+import { getConnectionStatus } from '../lib/session'
 import { Route as RootRoute } from './__root'
 
 const prompts = [
@@ -14,11 +16,13 @@ export const Route = createFileRoute('/ai')({
   beforeLoad: async () => {
     await requireAuthenticatedViewer()
   },
+  loader: () => getConnectionStatus(),
   component: AIPage,
 })
 
 function AIPage() {
   const viewer = RootRoute.useLoaderData()
+  const connection = Route.useLoaderData()
 
   return (
     <ProtectedShell
@@ -33,10 +37,7 @@ function AIPage() {
               <h1 className="text-lg font-medium tracking-tight text-zinc-100">AI analyst desk</h1>
             </div>
           </div>
-          <div className="hidden items-center gap-2 rounded-full border border-violet-900/30 bg-violet-900/10 px-3 py-1.5 text-xs text-violet-300 sm:flex">
-            <span className="h-1.5 w-1.5 rounded-full bg-violet-300" />
-            Prompt library
-          </div>
+          <MarketConnectionBadge connection={connection.connection} market={connection.market} />
         </>
       )}
     >
