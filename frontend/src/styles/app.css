@@ -1,3 +1,5 @@
+@import "tailwindcss";
+
 :root {
   color-scheme: light;
   font-family: "Manrope", "Segoe UI", sans-serif;
@@ -263,8 +265,9 @@ img {
 }
 
 .dashboard-route-main {
-  width: min(1440px, calc(100% - 48px));
-  margin: 34px auto;
+  width: 100%;
+  margin: 0;
+  min-height: 100vh;
 }
 
 .page {
@@ -1361,8 +1364,9 @@ img {
 
 @media (max-width: 720px) {
   .dashboard-route-main {
-    width: min(100%, calc(100% - 20px));
-    margin: 10px auto 18px;
+    width: 100%;
+    margin: 0;
+    min-height: 100vh;
   }
 
   .app-shell {
@@ -1467,8 +1471,9 @@ img {
 }
 
 .dashboard-route-main {
-  width: min(1540px, calc(100% - 24px));
-  margin: 20px auto 34px;
+  width: 100%;
+  margin: 0;
+  min-height: 100vh;
 }
 
 .trade-dashboard {
@@ -2447,8 +2452,9 @@ img {
 
 @media (max-width: 720px) {
   .dashboard-route-main {
-    width: min(100%, calc(100% - 12px));
-    margin: 12px auto 88px;
+    width: 100%;
+    margin: 0;
+    min-height: 100vh;
   }
 
   .trade-topbar,
@@ -2499,36 +2505,5 @@ img {
   .trade-mobile-dock a.active {
     color: var(--trade-ink);
     background: rgba(247, 147, 26, 0.12);
-  }
-}
-
-/* Dark Dashboard Mobile Styles */
-.mobile-menu-button {
-  display: none !important;
-}
-
-.dashboard-sidebar {
-  display: flex !important;
-}
-
-@media (max-width: 768px) {
-  .mobile-menu-button {
-    display: block !important;
-  }
-  
-  .dashboard-sidebar {
-    display: none !important;
-  }
-  
-  body.dark-dashboard-body aside {
-    display: flex !important;
-    position: fixed !important;
-    left: 0;
-    transform: translateX(-100%);
-    transition: transform 0.3s ease;
-  }
-  
-  body.dark-dashboard-body aside[style*="isMenuOpen: true"] {
-    transform: translateX(0);
   }
 }

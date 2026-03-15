@@ -9,12 +9,14 @@
   },
   "dependencies": {
     "@iconify/react": "^6.0.2",
+    "@tailwindcss/vite": "^4.2.1",
     "@tanstack/react-router": "^1.167.0",
     "@tanstack/react-router-devtools": "^1.166.7",
     "@tanstack/react-start": "^1.166.10",
     "evil-charts": "github:legions-developer/evilcharts",
     "react": "^19.1.1",
-    "react-dom": "^19.1.1"
+    "react-dom": "^19.1.1",
+    "tailwindcss": "^4.2.1"
   },
   "devDependencies": {
     "@types/node": "^24.3.0",

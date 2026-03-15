@@ -1,4 +1,5 @@
-import { useState } from 'react'
+import { useMemo, useState } from 'react'
+import type { ReactNode } from 'react'
 import { Link, createFileRoute, redirect } from '@tanstack/react-router'
 import { Icon } from '@iconify/react'
 import type { DashboardState, StrategyKey } from '../lib/session'
@@ -31,6 +32,59 @@ const strategyLabels: Record<StrategyKey, string> = {
   grid: 'Grid Bot',
   rebalance: 'Rebalance Bot',
   'infinity-grid': 'Infinity Grid',
+}
+
+const strategyPresentation: Record<
+  StrategyKey,
+  {
+    id: string
+    name: string
+    pair: string
+    exchange: string
+    strategy: string
+    uptime: string
+    icon: string
+    tone: 'blue' | 'purple' | 'zinc'
+    pnl: number
+    pnlPercent: number
+  }
+> = {
+  grid: {
+    id: 'trend-v1',
+    name: 'Trend Follower V1',
+    pair: 'BTC/USDT',
+    exchange: 'Binance',
+    strategy: 'EMA Crossover',
+    uptime: '14d 2h',
+    icon: 'solar:chart-line-linear',
+    tone: 'blue',
+    pnl: 342.1,
+    pnlPercent: 1.2,
+  },
+  'infinity-grid': {
+    id: 'grid-infinity',
+    name: 'Grid Infinity',
+    pair: 'ETH/USDT',
+    exchange: 'Kraken',
+    strategy: 'Grid Trading',
+    uptime: '45d 10h',
+    icon: 'solar:maximize-square-linear',
+    tone: 'purple',
+    pnl: 89.05,
+    pnlPercent: 0.4,
+  },
+  rebalance: {
+    id: 'sniper-sol',
+    name: 'Sniper SOL',
+    pair: 'SOL/USDT',
+    exchange: 'Binance',
+    strategy: 'Breakout',
+    uptime: 'Stopped',
+    icon: 'solar:bolt-linear',
+    tone: 'zinc',
+    pnl: 0,
+    pnlPercent: 0,
+  },
 }
 
 const currencyFormatter = new Intl.NumberFormat('en-US', {
@@ -67,8 +121,16 @@ export const Route = createFileRoute('/dashboard')({
   component: DashboardPage,
 })
 
+function cx(...classes: Array<string | false | null | undefined>) {
+  return classes.filter(Boolean).join(' ')
+}
+
 function formatCurrency(value: number) {
   return currencyFormatter.format(value)
+}
+
+function formatCompactCurrency(value: number) {
+  return compactCurrencyFormatter.format(value)
 }
 
 function formatPercent(value: number, digits = 2) {
@@ -78,20 +140,137 @@ function formatPercent(value: number, digits = 2) {
 
 function formatTimeAgo(timestamp?: string) {
   if (!timestamp) return 'Never'
-  
+
   const date = new Date(timestamp)
   const now = new Date()
   const diffMs = now.getTime() - date.getTime()
   const diffMins = Math.floor(diffMs / 60000)
   const diffHours = Math.floor(diffMs / 3600000)
   const diffDays = Math.floor(diffMs / 86400000)
-  
+
   if (diffMins < 1) return 'Just now'
   if (diffMins < 60) return `${diffMins} min${diffMins > 1 ? 's' : ''} ago`
   if (diffHours < 24) return `${diffHours} hour${diffHours > 1 ? 's' : ''} ago`
   if (diffDays < 7) return `${diffDays} day${diffDays > 1 ? 's' : ''} ago`
-  
+
   return dateTimeFormatter.format(date)
+}
+
+function toneClasses(tone: 'blue' | 'purple' | 'zinc') {
+  if (tone === 'blue') {
+    return {
+      box: 'border-blue-500/20 bg-blue-500/10 text-blue-400',
+      icon: 'text-blue-400',
+    }
+  }
+
+  if (tone === 'purple') {
+    return {
+      box: 'border-purple-500/20 bg-purple-500/10 text-purple-400',
+      icon: 'text-purple-400',
+    }
+  }
+
+  return {
+    box: 'border-zinc-700 bg-zinc-900 text-zinc-500',
+    icon: 'text-zinc-500',
+  }
+}
+
+function SidebarItem({
+  item,
+  active = false,
+  onClick,
+}: {
+  item: { label: string; icon: string; to?: string; badge?: string }
+  active?: boolean
+  onClick?: () => void
+}) {
+  const content = (
+    <>
+      <Icon icon={item.icon} width={18} height={18} className="shrink-0" />
+      <span>{item.label}</span>
+      {item.badge ? (
+        <span className="ml-auto rounded-full bg-zinc-800 px-2 py-0.5 text-xs text-zinc-300">
+          {item.badge}
+        </span>
+      ) : null}
+    </>
+  )
+
+  const classes = cx(
+    'flex items-center gap-3 rounded-md px-3 py-2 text-sm transition-colors',
+    active
+      ? 'bg-zinc-800/50 text-zinc-100'
+      : 'text-zinc-400 hover:bg-zinc-800/30 hover:text-zinc-100',
+  )
+
+  if (item.to) {
+    return (
+      <Link className={classes} to={item.to} onClick={onClick}>
+        {content}
+      </Link>
+    )
+  }
+
+  return (
+    <button className={cx(classes, 'w-full text-left')} type="button" onClick={onClick}>
+      {content}
+    </button>
+  )
+}
+
+function MetricCard({
+  label,
+  value,
+  icon,
+  accent,
+  change,
+  footer,
+  progress,
+}: {
+  label: string
+  value: ReactNode
+  icon: string
+  accent?: 'positive' | 'negative'
+  change?: React.ReactNode
+  footer?: React.ReactNode
+  progress?: number
+}) {
+  return (
+    <div className="flex flex-col justify-between rounded-xl border border-zinc-800/60 bg-zinc-900/40 p-5">
+      <div className="mb-4 flex items-start justify-between text-zinc-400">
+        <span className="text-sm font-normal">{label}</span>
+        <Icon icon={icon} width={18} height={18} />
+      </div>
+      <div>
+        <div
+          className={cx(
+            'text-2xl font-medium tracking-tight',
+            accent === 'positive'
+              ? 'text-emerald-400'
+              : accent === 'negative'
+                ? 'text-rose-400'
+                : 'text-zinc-100',
+          )}
+        >
+          {value}
+        </div>
+        {change ? <div className="mt-2 flex items-center gap-2">{change}</div> : null}
+        {footer ? <div className="mt-2">{footer}</div> : null}
+        {typeof progress === 'number' ? (
+          <div className="mt-2">
+            <div className="h-1.5 w-full rounded-full bg-zinc-800">
+              <div
+                className="h-1.5 rounded-full bg-zinc-400"
+                style={{ width: `${Math.max(0, Math.min(progress, 100))}%` }}
+              />
+            </div>
+          </div>
+        ) : null}
+      </div>
+    </div>
+  )
 }
 
 function DashboardPage() {
@@ -112,13 +291,12 @@ function DashboardPage() {
   const activeBots = dashboard.bots.filter((bot) => bot.status === 'paper-running').length
   const alertCount = dashboard.events.filter((event) => event.tone !== 'neutral').length
 
-  // Mock data for the redesigned dashboard
   const metricsData = {
     totalBalance: dashboard.capitalUsd,
     balanceChange: 2.4,
-    profit24h: 842.50,
+    profit24h: 842.5,
     trades24h: 14,
-    activeBots: activeBots,
+    activeBots,
     totalBots: dashboard.bots.length,
     winRate: 68.2,
     winRateChange: -1.2,
@@ -137,96 +315,72 @@ function DashboardPage() {
     { date: 'Nov 12', value: 85, positive: true },
   ]
 
-  const botStrategies = [
-    { 
-      id: 'trend-v1', 
-      name: 'Trend Follower V1', 
-      pair: 'BTC/USDT', 
-      exchange: 'Binance', 
-      strategy: 'EMA Crossover',
-      uptime: '14d 2h',
-      pnl: 342.10,
-      pnlPercent: 1.2,
-      status: 'running',
-      icon: 'solar:chart-line-linear',
-      color: 'blue'
-    },
-    { 
-      id: 'grid-infinity', 
-      name: 'Grid Infinity', 
-      pair: 'ETH/USDT', 
-      exchange: 'Kraken', 
-      strategy: 'Grid Trading',
-      uptime: '45d 10h',
-      pnl: 89.05,
-      pnlPercent: 0.4,
-      status: 'running',
-      icon: 'solar:maximize-square-linear',
-      color: 'purple'
-    },
-    { 
-      id: 'sniper-sol', 
-      name: 'Sniper SOL', 
-      pair: 'SOL/USDT', 
-      exchange: 'Binance', 
-      strategy: 'Breakout',
-      uptime: 'Stopped',
-      pnl: 0,
-      pnlPercent: 0,
-      status: 'stopped',
-      icon: 'solar:bolt-linear',
-      color: 'zinc'
-    },
-  ]
+  const botStrategies = dashboard.bots.map((bot) => {
+    const presentation = strategyPresentation[bot.key]
+    return {
+      ...presentation,
+      key: bot.key,
+      status: bot.status === 'idle' ? 'stopped' : 'running',
+    }
+  })
 
   const activityLog = [
-    { 
-      id: 1, 
-      icon: 'solar:check-circle-linear', 
+    {
+      id: 1,
+      icon: 'solar:check-circle-linear',
       color: 'emerald',
-      title: 'Trend Follower V1', 
+      title: 'Trend Follower V1',
       action: 'BUY',
       detail: 'executed order for 0.045 BTC at $34,210.50',
-      time: '2 mins ago'
+      time: '2 mins ago',
     },
-    { 
-      id: 2, 
-      icon: 'solar:info-circle-linear', 
+    {
+      id: 2,
+      icon: 'solar:info-circle-linear',
       color: 'blue',
-      title: 'Grid Infinity', 
+      title: 'Grid Infinity',
       action: '',
       detail: 'placed limit sell at $1,850.00',
-      time: '15 mins ago'
+      time: '15 mins ago',
     },
-    { 
-      id: 3, 
-      icon: 'solar:refresh-linear', 
+    {
+      id: 3,
+      icon: 'solar:refresh-linear',
       color: 'zinc',
-      title: 'System', 
+      title: 'System',
       action: '',
       detail: 'synced with Binance API successfully. Latency: 45ms',
-      time: '1 hour ago'
+      time: '1 hour ago',
     },
-    { 
-      id: 4, 
-      icon: 'solar:danger-triangle-linear', 
+    {
+      id: 4,
+      icon: 'solar:danger-triangle-linear',
       color: 'rose',
-      title: 'Sniper SOL', 
+      title: 'Sniper SOL',
       action: '',
       detail: 'stopped manually by user',
-      time: '3 hours ago'
+      time: '3 hours ago',
     },
-    { 
-      id: 5, 
-      icon: 'solar:check-circle-linear', 
+    {
+      id: 5,
+      icon: 'solar:check-circle-linear',
       color: 'emerald',
-      title: 'Trend Follower V1', 
+      title: 'Trend Follower V1',
       action: 'SELL',
       detail: 'executed order for 0.045 BTC at $34,500.00',
       profit: 13.02,
-      time: '5 hours ago'
+      time: '5 hours ago',
     },
   ]
+
+  const filteredActivityLog = useMemo(() => {
+    const needle = searchValue.trim().toLowerCase()
+    if (!needle) return activityLog
+
+    return activityLog.filter((log) =>
+      `${log.title} ${log.action} ${log.detail} ${log.time}`.toLowerCase().includes(needle),
+    )
+  }, [activityLog, searchValue])
 
   async function handlePaperRun() {
     try {
@@ -283,799 +437,270 @@ function DashboardPage() {
     }
   }
 
-  const containerStyle: React.CSSProperties = {
-    backgroundImage: 'radial-gradient(circle at 50% 0%, #18181b 0%, #09090b 100%)',
-    height: '100vh',
-    color: '#d4d4d8',
-    fontFamily: 'ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif',
-    display: 'flex',
-    overflow: 'hidden',
-  }
-
-  const sidebarStyle: React.CSSProperties = {
-    width: '256px',
-    borderRight: '1px solid rgba(39, 39, 42, 0.6)',
-    backgroundColor: 'rgba(9, 9, 11, 0.5)',
-    backdropFilter: 'blur(24px)',
-    display: 'flex',
-    flexDirection: 'column',
-    zIndex: 20,
-    flexShrink: 0,
-  }
-
-  const mainContentStyle: React.CSSProperties = {
-    flex: '1 1 0%',
-    display: 'flex',
-    flexDirection: 'column',
-    minWidth: 0,
-    backgroundColor: 'transparent',
-  }
-
   return (
-    <div style={containerStyle}>
-      {/* Mobile Menu Overlay */}
-      {isMenuOpen && (
-        <div 
-          style={{
-            position: 'fixed',
-            inset: 0,
-            backgroundColor: 'rgba(0, 0, 0, 0.5)',
-            zIndex: 30,
-          }}
+    <div
+      className="flex h-screen overflow-hidden bg-zinc-950 text-zinc-300 font-sans antialiased selection:bg-zinc-800 selection:text-zinc-100"
+      style={{ backgroundImage: 'radial-gradient(circle at 50% 0%, #18181b 0%, #09090b 100%)' }}
+    >
+      {isMenuOpen ? (
+        <button
+          aria-label="Close navigation"
+          className="fixed inset-0 z-20 bg-black/50 md:hidden"
+          type="button"
           onClick={() => setIsMenuOpen(false)}
         />
-      )}
+      ) : null}
 
-      {/* Sidebar */}
-      <aside className="dashboard-sidebar" style={{
-        ...sidebarStyle,
-        position: isMenuOpen ? 'fixed' : 'relative',
-        left: isMenuOpen ? 0 : undefined,
-        height: '100vh',
-        transform: isMenuOpen ? 'translateX(0)' : undefined,
-        transition: 'transform 0.3s ease',
-      }}>
-        {/* Logo */}
-        <div style={{
-          height: '64px',
-          display: 'flex',
-          alignItems: 'center',
-          padding: '0 24px',
-          borderBottom: '1px solid rgba(39, 39, 42, 0.6)',
-        }}>
-          <span style={{
-            color: '#fafafa',
-            fontSize: '1.125rem',
-            fontWeight: 500,
-            letterSpacing: '-0.025em',
-            textTransform: 'uppercase',
-          }}>Nexus</span>
-          <span style={{
-            marginLeft: '8px',
-            padding: '2px 6px',
-            borderRadius: '4px',
-            backgroundColor: '#27272a',
-            color: '#a1a1aa',
-            fontSize: '0.75rem',
-            fontWeight: 400,
-          }}>v2.4</span>
+      <aside
+        className={cx(
+          'fixed inset-y-0 left-0 z-30 flex w-64 flex-col border-r border-zinc-800/60 bg-zinc-950/50 backdrop-blur-xl transition-transform duration-300 md:static md:z-20 md:translate-x-0',
+          isMenuOpen ? 'translate-x-0' : '-translate-x-full',
+        )}
+      >
+        <div className="flex h-16 items-center border-b border-zinc-800/60 px-6">
+          <span className="text-lg font-medium uppercase tracking-tighter text-zinc-100">Nexus</span>
+          <span className="ml-2 rounded bg-zinc-800 px-1.5 py-0.5 text-xs font-normal text-zinc-400">
+            v2.4
+          </span>
         </div>
 
-        {/* Navigation */}
-        <nav style={{
-          flex: 1,
-          overflowY: 'auto',
-          padding: '16px 12px',
-          display: 'flex',
-          flexDirection: 'column',
-          gap: '4px',
-        }}>
-          <p style={{
-            padding: '0 12px',
-            fontSize: '0.75rem',
-            fontWeight: 400,
-            color: '#71717a',
-            marginBottom: '8px',
-            marginTop: '16px',
-            textTransform: 'uppercase',
-            letterSpacing: '0.1em',
-          }}>Platform</p>
-          
+        <nav className="flex-1 space-y-1 overflow-y-auto px-3 py-4 text-sm font-normal">
+          <p className="mb-2 mt-4 px-3 text-xs font-normal uppercase tracking-widest text-zinc-500">
+            Platform
+          </p>
           {navigationItems.map((item) => (
-            item.to ? (
-              <Link
-                key={item.id}
-                to={item.to}
-                style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: '12px',
-                  padding: '8px 12px',
-                  borderRadius: '6px',
-                  color: item.id === 'dashboard' ? '#fafafa' : '#a1a1aa',
-                  backgroundColor: item.id === 'dashboard' ? 'rgba(39, 39, 42, 0.5)' : 'transparent',
-                  textDecoration: 'none',
-                  transition: 'all 0.15s ease',
-                  fontSize: '0.875rem',
-                }}
-                onClick={() => setIsMenuOpen(false)}
-              >
-                <Icon icon={item.icon} width={20} height={20} />
-                <span>{item.label}</span>
-                {item.badge && (
-                  <span style={{
-                    marginLeft: 'auto',
-                    backgroundColor: '#27272a',
-                    color: '#d4d4d8',
-                    padding: '2px 8px',
-                    borderRadius: '9999px',
-                    fontSize: '0.75rem',
-                  }}>{item.badge}</span>
-                )}
-              </Link>
-            ) : (
-              <button
-                key={item.id}
-                style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: '12px',
-                  padding: '8px 12px',
-                  borderRadius: '6px',
-                  color: '#a1a1aa',
-                  backgroundColor: 'transparent',
-                  border: 'none',
-                  cursor: 'pointer',
-                  textAlign: 'left',
-                  fontSize: '0.875rem',
-                  transition: 'all 0.15s ease',
-                }}
-              >
-                <Icon icon={item.icon} width={20} height={20} />
-                <span>{item.label}</span>
-              </button>
-            )
-          ))}
-
-          <p style={{
-            padding: '0 12px',
-            fontSize: '0.75rem',
-            fontWeight: 400,
-            color: '#71717a',
-            marginBottom: '8px',
-            marginTop: '32px',
-            textTransform: 'uppercase',
-            letterSpacing: '0.1em',
-          }}>Connections</p>
-          
-          {connectionItems.map((item) => (
-            <button
+            <SidebarItem
+              active={item.id === 'dashboard'}
+              item={item}
               key={item.id}
-              style={{
-                display: 'flex',
-                alignItems: 'center',
-                gap: '12px',
-                padding: '8px 12px',
-                borderRadius: '6px',
-                color: '#a1a1aa',
-                backgroundColor: 'transparent',
-                border: 'none',
-                cursor: 'pointer',
-                textAlign: 'left',
-                fontSize: '0.875rem',
-                transition: 'all 0.15s ease',
-              }}
-            >
-              <Icon icon={item.icon} width={20} height={20} />
-              <span>{item.label}</span>
-            </button>
+              onClick={() => setIsMenuOpen(false)}
+            />
           ))}
 
-          <p style={{
-            padding: '0 12px',
-            fontSize: '0.75rem',
-            fontWeight: 400,
-            color: '#71717a',
-            marginBottom: '8px',
-            marginTop: '32px',
-            textTransform: 'uppercase',
-            letterSpacing: '0.1em',
-          }}>System</p>
-          
+          <p className="mb-2 mt-8 px-3 text-xs font-normal uppercase tracking-widest text-zinc-500">
+            Connections
+          </p>
+          {connectionItems.map((item) => (
+            <SidebarItem item={item} key={item.id} />
+          ))}
+
+          <p className="mb-2 mt-8 px-3 text-xs font-normal uppercase tracking-widest text-zinc-500">
+            System
+          </p>
           {systemItems.map((item) => (
-            item.to ? (
-              <Link
-                key={item.id}
-                to={item.to}
-                style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: '12px',
-                  padding: '8px 12px',
-                  borderRadius: '6px',
-                  color: '#a1a1aa',
-                  textDecoration: 'none',
-                  transition: 'all 0.15s ease',
-                  fontSize: '0.875rem',
-                }}
-                onClick={() => setIsMenuOpen(false)}
-              >
-                <Icon icon={item.icon} width={20} height={20} />
-                <span>{item.label}</span>
-              </Link>
-            ) : (
-              <button
-                key={item.id}
-                style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: '12px',
-                  padding: '8px 12px',
-                  borderRadius: '6px',
-                  color: '#a1a1aa',
-                  backgroundColor: 'transparent',
-                  border: 'none',
-                  cursor: 'pointer',
-                  textAlign: 'left',
-                  fontSize: '0.875rem',
-                  transition: 'all 0.15s ease',
-                }}
-              >
-                <Icon icon={item.icon} width={20} height={20} />
-                <span>{item.label}</span>
-              </button>
-            )
+            <SidebarItem item={item} key={item.id} onClick={() => setIsMenuOpen(false)} />
           ))}
         </nav>
 
-        {/* User Profile */}
-        <div style={{
-          padding: '16px',
-          borderTop: '1px solid rgba(39, 39, 42, 0.6)',
-        }}>
+        <div className="border-t border-zinc-800/60 p-4">
           <button
-            onClick={() => void handleLogout()}
+            className="flex w-full items-center gap-3 rounded-md p-2 text-left transition-colors hover:bg-zinc-800/30"
             disabled={isLoggingOut}
-            style={{
-              display: 'flex',
-              alignItems: 'center',
-              width: '100%',
-              gap: '12px',
-              padding: '8px',
-              borderRadius: '6px',
-              backgroundColor: 'transparent',
-              border: 'none',
-              cursor: 'pointer',
-              textAlign: 'left',
-              transition: 'background-color 0.15s ease',
+            type="button"
+            onClick={() => {
+              void handleLogout()
             }}
           >
-            <div style={{
-              width: '32px',
-              height: '32px',
-              borderRadius: '9999px',
-              backgroundColor: '#27272a',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              color: '#a1a1aa',
-              border: '1px solid #3f3f46',
-            }}>
-              <Icon icon="solar:user-linear" width={18} height={18} />
+            <div className="flex h-8 w-8 items-center justify-center rounded-full border border-zinc-700 bg-zinc-800 text-zinc-400">
+              <Icon icon="solar:user-linear" width={16} height={16} />
             </div>
-            <div style={{ flex: 1, overflow: 'hidden' }}>
-              <p style={{
-                fontSize: '0.875rem',
-                fontWeight: 400,
-                color: '#e4e4e7',
-                margin: 0,
-                whiteSpace: 'nowrap',
-                overflow: 'hidden',
-                textOverflow: 'ellipsis',
-              }}>{loaderData.viewer.displayName}</p>
-              <p style={{
-                fontSize: '0.75rem',
-                color: '#71717a',
-                margin: 0,
-                whiteSpace: 'nowrap',
-                overflow: 'hidden',
-                textOverflow: 'ellipsis',
-              }}>Pro Plan</p>
+            <div className="min-w-0 flex-1 overflow-hidden">
+              <p className="truncate text-sm font-normal text-zinc-200">
+                {isLoggingOut ? 'Logging out...' : loaderData.viewer.displayName}
+              </p>
+              <p className="truncate text-xs text-zinc-500">Pro Plan</p>
             </div>
-            <Icon icon="solar:alt-arrow-up-linear" width={16} height={16} color="#71717a" />
+            <Icon
+              icon="solar:alt-arrow-up-linear"
+              width={16}
+              height={16}
+              className="text-zinc-500"
+            />
           </button>
         </div>
       </aside>
 
-      {/* Main Content */}
-      <main style={mainContentStyle}>
-        {/* Header */}
-        <header style={{
-          height: '64px',
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'space-between',
-          padding: '0 24px',
-          borderBottom: '1px solid rgba(39, 39, 42, 0.6)',
-          backgroundColor: 'rgba(9, 9, 11, 0.8)',
-          backdropFilter: 'blur(12px)',
-          position: 'sticky',
-          top: 0,
-          zIndex: 10,
-        }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
+      <main className="flex min-w-0 flex-1 flex-col bg-transparent">
+        <header className="sticky top-0 z-10 flex h-16 items-center justify-between border-b border-zinc-800/60 bg-zinc-950/80 px-4 backdrop-blur-md sm:px-6 lg:px-8">
+          <div className="flex items-center gap-4">
             <button
+              className="text-zinc-400 transition-colors hover:text-zinc-100 md:hidden"
+              type="button"
               onClick={() => setIsMenuOpen(true)}
-              className="mobile-menu-button"
-              style={{
-                backgroundColor: 'transparent',
-                border: 'none',
-                color: '#a1a1aa',
-                cursor: 'pointer',
-                padding: '8px',
-              }}
             >
-              <Icon icon="solar:hamburger-menu-linear" width={24} height={24} />
+              <Icon icon="solar:hamburger-menu-linear" width={22} height={22} />
             </button>
-            <h1 style={{
-              fontSize: '1.125rem',
-              fontWeight: 500,
-              letterSpacing: '-0.025em',
-              color: '#fafafa',
-              margin: 0,
-            }}>Overview</h1>
-            
-            {/* Environment Toggle */}
-            <div style={{
-              display: 'flex',
-              alignItems: 'center',
-              backgroundColor: '#18181b',
-              borderRadius: '6px',
-              padding: '2px',
-              border: '1px solid #27272a',
-            }}>
-              <button style={{
-                padding: '4px 12px',
-                fontSize: '0.75rem',
-                fontWeight: 400,
-                borderRadius: '4px',
-                backgroundColor: 'transparent',
-                border: 'none',
-                color: '#a1a1aa',
-                cursor: 'pointer',
-              }}>Testnet</button>
-              <button style={{
-                padding: '4px 12px',
-                fontSize: '0.75rem',
-                fontWeight: 400,
-                borderRadius: '4px',
-                backgroundColor: '#27272a',
-                border: '1px solid rgba(63, 63, 70, 0.5)',
-                color: '#fafafa',
-                cursor: 'pointer',
-                boxShadow: '0 1px 2px rgba(0, 0, 0, 0.1)',
-              }}>Live</button>
+            <h1 className="hidden text-lg font-medium tracking-tight text-zinc-100 sm:block">
+              Overview
+            </h1>
+            <div className="hidden items-center rounded-md border border-zinc-800 bg-zinc-900 p-0.5 sm:flex">
+              <button
+                className="rounded px-3 py-1 text-xs font-normal text-zinc-400 transition-colors hover:text-zinc-200"
+                type="button"
+              >
+                Testnet
+              </button>
+              <button
+                className="rounded border border-zinc-700/50 bg-zinc-800 px-3 py-1 text-xs font-normal text-zinc-100 shadow-sm"
+                type="button"
+              >
+                Live
+              </button>
             </div>
           </div>
 
-          <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
-            <div style={{
-              display: 'flex',
-              alignItems: 'center',
-              gap: '8px',
-              padding: '6px 12px',
-              borderRadius: '9999px',
-              border: '1px solid rgba(6, 78, 59, 0.3)',
-              backgroundColor: 'rgba(6, 78, 59, 0.1)',
-              color: '#10b981',
-              fontSize: '0.75rem',
-              fontWeight: 400,
-            }}>
-              <span style={{
-                width: '6px',
-                height: '6px',
-                borderRadius: '9999px',
-                backgroundColor: '#10b981',
-                animation: 'pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite',
-              }} />
+          <div className="flex items-center gap-4">
+            <div className="hidden items-center gap-2 rounded-full border border-emerald-900/30 bg-emerald-900/10 px-3 py-1.5 text-xs font-normal text-emerald-500 sm:flex">
+              <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-emerald-500" />
               Binance API Connected
             </div>
-            <button style={{
-              position: 'relative',
-              backgroundColor: 'transparent',
-              border: 'none',
-              color: '#a1a1aa',
-              cursor: 'pointer',
-              padding: '4px',
-            }}>
-              <Icon icon="solar:bell-linear" width={24} height={24} />
-              {alertCount > 0 && (
-                <span style={{
-                  position: 'absolute',
-                  top: '4px',
-                  right: '4px',
-                  width: '6px',
-                  height: '6px',
-                  borderRadius: '9999px',
-                  backgroundColor: '#f43f5e',
-                }} />
-              )}
+            <button className="relative p-1 text-zinc-400 transition-colors hover:text-zinc-100" type="button">
+              <Icon icon="solar:bell-linear" width={20} height={20} />
+              {alertCount > 0 ? (
+                <span className="absolute right-1 top-1 h-1.5 w-1.5 rounded-full bg-rose-500" />
+              ) : null}
             </button>
           </div>
         </header>
 
-        {/* Scrollable Content */}
-        <div style={{
-          flex: '1 1 0%',
-          padding: '24px',
-          display: 'flex',
-          flexDirection: 'column',
-          gap: '32px',
-          overflowY: 'auto',
-        }}>
-          {/* Error Message */}
-          {actionError && (
-            <div style={{
-              padding: '12px 16px',
-              borderRadius: '8px',
-              backgroundColor: 'rgba(244, 63, 94, 0.1)',
-              border: '1px solid rgba(244, 63, 94, 0.2)',
-              color: '#fb7185',
-            }}>
+        <div className="flex-1 space-y-8 overflow-y-auto p-4 sm:p-6 lg:p-8">
+          {actionError ? (
+            <div className="rounded-xl border border-rose-500/20 bg-rose-500/10 px-4 py-3 text-sm text-rose-300">
               {actionError}
             </div>
-          )}
+          ) : null}
 
-          {/* Metrics Grid */}
-          <div style={{
-            display: 'grid',
-            gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))',
-            gap: '16px',
-          }}>
-            {/* Total Balance Card */}
-            <div style={{
-              backgroundColor: 'rgba(24, 24, 27, 0.4)',
-              border: '1px solid rgba(39, 39, 42, 0.6)',
-              borderRadius: '12px',
-              padding: '20px',
-              display: 'flex',
-              flexDirection: 'column',
-              justifyContent: 'space-between',
-            }}>
-              <div style={{
-                display: 'flex',
-                alignItems: 'flex-start',
-                justifyContent: 'space-between',
-                color: '#a1a1aa',
-                marginBottom: '16px',
-              }}>
-                <span style={{ fontSize: '0.875rem', fontWeight: 400 }}>Total Balance</span>
-                <Icon icon="solar:wallet-linear" width={20} height={20} />
-              </div>
-              <div>
-                <div style={{
-                  fontSize: '1.5rem',
-                  fontWeight: 500,
-                  letterSpacing: '-0.025em',
-                  color: '#fafafa',
-                }}>{formatCurrency(metricsData.totalBalance)}</div>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginTop: '8px' }}>
-                  <span style={{
-                    display: 'flex',
-                    alignItems: 'center',
-                    color: '#34d399',
-                    fontSize: '0.75rem',
-                    fontWeight: 400,
-                    backgroundColor: 'rgba(52, 211, 153, 0.1)',
-                    padding: '2px 6px',
-                    borderRadius: '4px',
-                  }}>
-                    <Icon icon="solar:arrow-right-up-linear" width={12} height={12} style={{ marginRight: '2px' }} />
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
+            <MetricCard
+              change={
+                <>
+                  <span className="flex items-center rounded bg-emerald-400/10 px-1.5 py-0.5 text-xs font-normal text-emerald-400">
+                    <Icon icon="solar:arrow-right-up-linear" width={12} height={12} className="mr-0.5" />
                     {formatPercent(metricsData.balanceChange)}
                   </span>
-                  <span style={{ fontSize: '0.75rem', color: '#71717a', fontWeight: 400 }}>vs last 24h</span>
+                  <span className="text-xs font-normal text-zinc-500">vs last 24h</span>
+                </>
+              }
+              icon="solar:wallet-linear"
+              label="Total Balance"
+              value={formatCurrency(metricsData.totalBalance)}
+            />
+            <MetricCard
+              accent="positive"
+              footer={<span className="text-xs font-normal text-zinc-500">{metricsData.trades24h} trades executed</span>}
+              icon="solar:graph-up-linear"
+              label="24h Profit"
+              value={`+${formatCurrency(metricsData.profit24h)}`}
+            />
+            <MetricCard
+              footer={
+                <div className="text-2xl font-medium tracking-tight text-zinc-100">
+                  {metricsData.activeBots}{' '}
+                  <span className="text-lg font-normal text-zinc-600">/ {metricsData.totalBots}</span>
                 </div>
-              </div>
-            </div>
-
-            {/* 24h Profit Card */}
-            <div style={{
-              backgroundColor: 'rgba(24, 24, 27, 0.4)',
-              border: '1px solid rgba(39, 39, 42, 0.6)',
-              borderRadius: '12px',
-              padding: '20px',
-              display: 'flex',
-              flexDirection: 'column',
-              justifyContent: 'space-between',
-            }}>
-              <div style={{
-                display: 'flex',
-                alignItems: 'flex-start',
-                justifyContent: 'space-between',
-                color: '#a1a1aa',
-                marginBottom: '16px',
-              }}>
-                <span style={{ fontSize: '0.875rem', fontWeight: 400 }}>24h Profit</span>
-                <Icon icon="solar:graph-up-linear" width={20} height={20} />
-              </div>
-              <div>
-                <div style={{
-                  fontSize: '1.5rem',
-                  fontWeight: 500,
-                  letterSpacing: '-0.025em',
-                  color: '#34d399',
-                }}>+{formatCurrency(metricsData.profit24h)}</div>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginTop: '8px' }}>
-                  <span style={{ fontSize: '0.75rem', color: '#71717a', fontWeight: 400 }}>{metricsData.trades24h} trades executed</span>
-                </div>
-              </div>
-            </div>
-
-            {/* Active Bots Card */}
-            <div style={{
-              backgroundColor: 'rgba(24, 24, 27, 0.4)',
-              border: '1px solid rgba(39, 39, 42, 0.6)',
-              borderRadius: '12px',
-              padding: '20px',
-              display: 'flex',
-              flexDirection: 'column',
-              justifyContent: 'space-between',
-            }}>
-              <div style={{
-                display: 'flex',
-                alignItems: 'flex-start',
-                justifyContent: 'space-between',
-                color: '#a1a1aa',
-                marginBottom: '16px',
-              }}>
-                <span style={{ fontSize: '0.875rem', fontWeight: 400 }}>Active Bots</span>
-                <Icon icon="solar:cpu-linear" width={20} height={20} />
-              </div>
-              <div>
-                <div style={{
-                  fontSize: '1.5rem',
-                  fontWeight: 500,
-                  letterSpacing: '-0.025em',
-                  color: '#fafafa',
-                }}>
-                  {metricsData.activeBots} <span style={{ fontSize: '1.125rem', color: '#52525b', fontWeight: 400 }}>/ {metricsData.totalBots}</span>
-                </div>
-                <div style={{ marginTop: '8px' }}>
-                  <div style={{
-                    width: '100%',
-                    backgroundColor: '#27272a',
-                    borderRadius: '9999px',
-                    height: '6px',
-                  }}>
-                    <div style={{
-                      backgroundColor: '#a1a1aa',
-                      height: '6px',
-                      borderRadius: '9999px',
-                      width: `${(metricsData.activeBots / metricsData.totalBots) * 100}%`,
-                    }} />
-                  </div>
-                </div>
-              </div>
-            </div>
-
-            {/* Win Rate Card */}
-            <div style={{
-              backgroundColor: 'rgba(24, 24, 27, 0.4)',
-              border: '1px solid rgba(39, 39, 42, 0.6)',
-              borderRadius: '12px',
-              padding: '20px',
-              display: 'flex',
-              flexDirection: 'column',
-              justifyContent: 'space-between',
-            }}>
-              <div style={{
-                display: 'flex',
-                alignItems: 'flex-start',
-                justifyContent: 'space-between',
-                color: '#a1a1aa',
-                marginBottom: '16px',
-              }}>
-                <span style={{ fontSize: '0.875rem', fontWeight: 400 }}>Win Rate (30d)</span>
-                <Icon icon="solar:target-linear" width={20} height={20} />
-              </div>
-              <div>
-                <div style={{
-                  fontSize: '1.5rem',
-                  fontWeight: 500,
-                  letterSpacing: '-0.025em',
-                  color: '#fafafa',
-                }}>{metricsData.winRate.toFixed(1)}%</div>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginTop: '8px' }}>
-                  <span style={{
-                    display: 'flex',
-                    alignItems: 'center',
-                    color: '#fb7185',
-                    fontSize: '0.75rem',
-                    fontWeight: 400,
-                    backgroundColor: 'rgba(251, 113, 133, 0.1)',
-                    padding: '2px 6px',
-                    borderRadius: '4px',
-                  }}>
-                    <Icon icon="solar:arrow-right-down-linear" width={12} height={12} style={{ marginRight: '2px' }} />
+              }
+              icon="solar:cpu-linear"
+              label="Active Bots"
+              progress={(metricsData.activeBots / metricsData.totalBots) * 100}
+              value={null}
+            />
+            <MetricCard
+              change={
+                <>
+                  <span className="flex items-center rounded bg-rose-400/10 px-1.5 py-0.5 text-xs font-normal text-rose-400">
+                    <Icon
+                      icon="solar:arrow-right-down-linear"
+                      width={12}
+                      height={12}
+                      className="mr-0.5"
+                    />
                     {Math.abs(metricsData.winRateChange).toFixed(1)}%
                   </span>
-                  <span style={{ fontSize: '0.75rem', color: '#71717a', fontWeight: 400 }}>vs previous 30d</span>
-                </div>
-              </div>
-            </div>
+                  <span className="text-xs font-normal text-zinc-500">vs previous 30d</span>
+                </>
+              }
+              icon="solar:target-linear"
+              label="Win Rate (30d)"
+              value={`${metricsData.winRate.toFixed(1)}%`}
+            />
           </div>
 
-          {/* Chart Section */}
-          <div style={{
-            backgroundColor: 'rgba(24, 24, 27, 0.3)',
-            border: '1px solid rgba(39, 39, 42, 0.5)',
-            borderRadius: '12px',
-            overflow: 'hidden',
-          }}>
-            <div style={{
-              padding: '20px',
-              borderBottom: '1px solid rgba(39, 39, 42, 0.5)',
-              display: 'flex',
-              flexDirection: 'row',
-              alignItems: 'center',
-              justifyContent: 'space-between',
-              gap: '16px',
-            }}>
+          <div className="overflow-hidden rounded-xl border border-zinc-800/50 bg-zinc-900/30">
+            <div className="flex flex-col justify-between gap-4 border-b border-zinc-800/50 p-5 sm:flex-row sm:items-center">
               <div>
-                <h2 style={{
-                  fontSize: '1rem',
-                  fontWeight: 500,
-                  color: '#fafafa',
-                  letterSpacing: '-0.025em',
-                  margin: 0,
-                }}>Portfolio Performance</h2>
-                <p style={{
-                  fontSize: '0.75rem',
-                  color: '#71717a',
-                  margin: '4px 0 0',
-                  fontWeight: 400,
-                }}>Combined PnL across all active strategies</p>
+                <h2 className="text-base font-medium tracking-tight text-zinc-100">
+                  Portfolio Performance
+                </h2>
+                <p className="mt-1 text-xs font-normal text-zinc-500">
+                  Combined PnL across all active strategies
+                </p>
               </div>
-              {/* Timeframe Selector */}
-              <div style={{
-                display: 'flex',
-                alignItems: 'center',
-                backgroundColor: 'rgba(24, 24, 27, 0.8)',
-                borderRadius: '8px',
-                padding: '2px',
-                border: '1px solid #27272a',
-                fontSize: '0.75rem',
-                fontWeight: 400,
-              }}>
+              <div className="flex items-center rounded-lg border border-zinc-800 bg-zinc-900/80 p-0.5 text-xs font-normal">
                 {['1H', '1D', '1W', '1M', 'ALL'].map((timeframe, idx) => (
                   <button
+                    className={cx(
+                      'rounded-md px-3 py-1.5 transition-colors',
+                      idx === 2
+                        ? 'border border-zinc-700/50 bg-zinc-800 text-zinc-100 shadow-sm'
+                        : 'text-zinc-400 hover:text-zinc-200',
+                    )}
                     key={timeframe}
-                    style={{
-                      padding: '6px 12px',
-                      borderRadius: '6px',
-                      backgroundColor: idx === 2 ? '#27272a' : 'transparent',
-                      border: idx === 2 ? '1px solid rgba(63, 63, 70, 0.5)' : 'none',
-                      color: idx === 2 ? '#fafafa' : '#a1a1aa',
-                      cursor: 'pointer',
-                      fontSize: '0.75rem',
-                      boxShadow: idx === 2 ? '0 1px 2px rgba(0, 0, 0, 0.1)' : 'none',
-                    }}
+                    type="button"
                   >
                     {timeframe}
                   </button>
                 ))}
               </div>
             </div>
-            
-            <div style={{
-              padding: '20px',
-              height: '280px',
-              position: 'relative',
-            }}>
-              {/* Y-Axis Labels */}
-              <div style={{
-                position: 'absolute',
-                left: '20px',
-                top: '20px',
-                bottom: '48px',
-                display: 'flex',
-                flexDirection: 'column',
-                justifyContent: 'space-between',
-                fontSize: '0.75rem',
-                color: '#52525b',
-                fontWeight: 400,
-                zIndex: 0,
-              }}>
+
+            <div className="relative h-64 p-5">
+              <div className="absolute bottom-8 left-5 top-5 z-0 flex flex-col justify-between text-xs font-normal text-zinc-600">
                 <span>+$2k</span>
                 <span>+$1k</span>
                 <span>0</span>
                 <span>-$1k</span>
               </div>
-              
-              {/* Horizontal Grid Lines */}
-              <div style={{
-                position: 'absolute',
-                left: '56px',
-                right: '20px',
-                top: '24px',
-                bottom: '48px',
-                zIndex: 0,
-                pointerEvents: 'none',
-              }}>
-                <div style={{
-                  position: 'absolute',
-                  top: 0,
-                  left: 0,
-                  right: 0,
-                  borderTop: '1px dashed rgba(39, 39, 42, 0.3)',
-                }} />
-                <div style={{
-                  position: 'absolute',
-                  top: '33%',
-                  left: 0,
-                  right: 0,
-                  borderTop: '1px dashed rgba(39, 39, 42, 0.3)',
-                }} />
-                <div style={{
-                  position: 'absolute',
-                  top: '50%',
-                  left: 0,
-                  right: 0,
-                  borderTop: '1px solid rgba(63, 63, 70, 0.5)',
-                }} />
-                <div style={{
-                  position: 'absolute',
-                  bottom: 0,
-                  left: 0,
-                  right: 0,
-                  borderTop: '1px dashed rgba(39, 39, 42, 0.3)',
-                }} />
+
+              <div className="pointer-events-none absolute bottom-10 left-14 right-5 top-6 z-0 flex flex-col justify-between">
+                <div className="w-full border-t border-dashed border-zinc-800/30" />
+                <div className="w-full border-t border-dashed border-zinc-800/30" />
+                <div className="w-full border-t border-zinc-700/50" />
+                <div className="w-full border-t border-dashed border-zinc-800/30" />
               </div>
 
-              {/* Bar Chart */}
-              <div style={{
-                position: 'absolute',
-                left: '56px',
-                right: '20px',
-                top: '24px',
-                bottom: '48px',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'space-between',
-                gap: '4px',
-                zIndex: 10,
-              }}>
-                {chartData.map((data, idx) => (
+              <div className="relative z-10 ml-12 mt-2 flex h-full items-end justify-between gap-1 pb-6 sm:gap-2">
+                {chartData.map((data) => (
                   <div
-                    key={idx}
-                    style={{
-                      flex: 1,
-                      height: `${Math.min(Math.abs(data.value), 100)}%`,
-                      backgroundColor: data.positive ? 'rgba(16, 185, 129, 0.25)' : 'rgba(244, 63, 94, 0.25)',
-                      border: `1px solid ${data.positive ? 'rgba(16, 185, 129, 0.35)' : 'rgba(244, 63, 94, 0.35)'}`,
-                      borderRadius: '2px',
-                      position: 'relative',
-                      transform: data.value >= 0 ? 'translateY(-50%)' : 'translateY(50%)',
-                      transition: 'all 0.15s ease',
-                      cursor: 'pointer',
-                    }}
-                    title={`${data.date}: ${data.positive ? '+' : ''}$${Math.abs(data.value * 10)}`}
-                  />
+                    className={cx(
+                      'group relative w-full cursor-crosshair rounded-t-sm border transition-colors',
+                      data.positive
+                        ? 'border-emerald-500/30 bg-emerald-500/20 hover:bg-emerald-500/40'
+                        : 'mt-auto self-start border-rose-500/30 bg-rose-500/20 hover:bg-rose-500/40',
+                    )}
+                    key={data.date}
+                    style={
+                      data.positive
+                        ? { height: `${data.value}%` }
+                        : {
+                            height: `${Math.abs(data.value)}%`,
+                            transform: 'translateY(100%) scaleY(-1)',
+                            transformOrigin: 'top',
+                          }
+                    }
+                    title={`${data.date}: ${data.positive ? '+' : '-'}${formatCompactCurrency(
+                      Math.abs(data.value) * 20,
+                    )}`}
+                  >
+                    {data.date === 'Nov 12' ? (
+                      <div className="pointer-events-none absolute -top-10 left-1/2 hidden -translate-x-1/2 whitespace-nowrap rounded border border-zinc-700 bg-zinc-800 px-2 py-1 text-xs text-zinc-100 opacity-0 transition-opacity group-hover:block group-hover:opacity-100">
+                        Nov 12: +$1,120
+                      </div>
+                    ) : null}
+                  </div>
                 ))}
               </div>
-              
-              {/* X-Axis Labels */}
-              <div style={{
-                position: 'absolute',
-                bottom: '16px',
-                left: '56px',
-                right: '20px',
-                display: 'flex',
-                justifyContent: 'space-between',
-                fontSize: '0.75rem',
-                color: '#52525b',
-                fontWeight: 400,
-              }}>
+
+              <div className="absolute bottom-0 left-0 right-5 ml-12 flex justify-between pb-2 text-xs font-normal text-zinc-600">
                 <span>Nov 3</span>
                 <span>Nov 6</span>
                 <span>Nov 9</span>
@@ -1084,309 +709,182 @@ function DashboardPage() {
             </div>
           </div>
 
-          {/* Two Column Layout */}
-          <div style={{
-            display: 'grid',
-            gridTemplateColumns: '2fr 1fr',
-            gap: '32px',
-          }}>
-            {/* Active Strategies Table */}
-            <div style={{ display: 'flex', flexDirection: 'column' }}>
-              <div style={{
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'space-between',
-                marginBottom: '16px',
-              }}>
-                <h2 style={{
-                  fontSize: '1rem',
-                  fontWeight: 500,
-                  color: '#fafafa',
-                  letterSpacing: '-0.025em',
-                  margin: 0,
-                }}>Active Strategies</h2>
+          <div className="grid grid-cols-1 gap-8 lg:grid-cols-3">
+            <div className="flex flex-col lg:col-span-2">
+              <div className="mb-4 flex items-center justify-between">
+                <h2 className="text-base font-medium tracking-tight text-zinc-100">Active Strategies</h2>
                 <Link
+                  className="flex items-center gap-1.5 rounded-md bg-zinc-100 px-3 py-1.5 text-xs font-normal text-zinc-900 transition-colors hover:bg-zinc-200"
                   to="/bots"
-                  style={{
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: '6px',
-                    fontSize: '0.75rem',
-                    fontWeight: 400,
-                    backgroundColor: '#fafafa',
-                    color: '#18181b',
-                    padding: '6px 12px',
-                    borderRadius: '6px',
-                    textDecoration: 'none',
-                    transition: 'background-color 0.15s ease',
-                  }}
                 >
                   <Icon icon="solar:add-circle-linear" width={16} height={16} />
                   New Bot
                 </Link>
               </div>
-              
-              <div style={{
-                backgroundColor: 'rgba(24, 24, 27, 0.3)',
-                border: '1px solid rgba(39, 39, 42, 0.5)',
-                borderRadius: '12px',
-                overflow: 'hidden',
-                flex: 1,
-              }}>
-                <div style={{ overflowX: 'auto' }}>
-                  <table style={{
-                    width: '100%',
-                    textAlign: 'left',
-                    fontSize: '0.875rem',
-                    whiteSpace: 'nowrap',
-                    borderCollapse: 'collapse',
-                  }}>
-                    <thead style={{
-                      borderBottom: '1px solid rgba(39, 39, 42, 0.5)',
-                      backgroundColor: 'rgba(24, 24, 27, 0.2)',
-                      fontSize: '0.75rem',
-                      color: '#71717a',
-                      fontWeight: 400,
-                      textTransform: 'uppercase',
-                      letterSpacing: '0.05em',
-                    }}>
+
+              <div className="flex-1 overflow-hidden rounded-xl border border-zinc-800/50 bg-zinc-900/30">
+                <div className="overflow-x-auto">
+                  <table className="w-full whitespace-nowrap text-left text-sm">
+                    <thead className="border-b border-zinc-800/50 bg-zinc-900/20 text-xs font-normal uppercase tracking-wider text-zinc-500">
                       <tr>
-                        <th style={{ padding: '12px 20px' }}>Bot Name</th>
-                        <th style={{ padding: '12px 20px' }}>Pair / Exchange</th>
-                        <th style={{ padding: '12px 20px' }}>Strategy</th>
-                        <th style={{ padding: '12px 20px', textAlign: 'right' }}>Unrealized PnL</th>
-                        <th style={{ padding: '12px 20px', textAlign: 'center' }}>Status</th>
-                        <th style={{ padding: '12px 20px' }} />
+                        <th className="px-5 py-3">Bot Name</th>
+                        <th className="px-5 py-3">Pair / Exchange</th>
+                        <th className="px-5 py-3">Strategy</th>
+                        <th className="px-5 py-3 text-right">Unrealized PnL</th>
+                        <th className="px-5 py-3 text-center">Status</th>
+                        <th className="px-5 py-3" />
                       </tr>
                     </thead>
-                    <tbody style={{
-                      borderTop: '1px solid rgba(39, 39, 42, 0.3)',
-                    }}>
-                      {botStrategies.map((bot) => (
-                        <tr
-                          key={bot.id}
-                          style={{
-                            transition: 'background-color 0.15s ease',
-                            opacity: bot.status === 'stopped' ? 0.6 : 1,
-                          }}
-                        >
-                          <td style={{ padding: '16px 20px' }}>
-                            <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-                              <div style={{
-                                width: '32px',
-                                height: '32px',
-                                borderRadius: '6px',
-                                backgroundColor: bot.color === 'blue' ? 'rgba(59, 130, 246, 0.1)' : bot.color === 'purple' ? 'rgba(168, 85, 247, 0.1)' : 'rgba(39, 39, 42, 1)',
-                                border: `1px solid ${bot.color === 'blue' ? 'rgba(59, 130, 246, 0.2)' : bot.color === 'purple' ? 'rgba(168, 85, 247, 0.2)' : 'rgba(63, 63, 70, 1)'}`,
-                                display: 'flex',
-                                alignItems: 'center',
-                                justifyContent: 'center',
-                                color: bot.color === 'blue' ? '#60a5fa' : bot.color === 'purple' ? '#c084fc' : '#71717a',
-                              }}>
-                                <Icon icon={bot.icon} width={18} height={18} />
+                    <tbody>
+                      {botStrategies.map((bot) => {
+                        const tone = toneClasses(bot.tone)
+                        const isSelected = bot.key === selectedStrategy
+                        return (
+                          <tr
+                            className={cx(
+                              'border-t border-zinc-800/30 transition-colors',
+                              bot.status === 'stopped' && 'opacity-60',
+                              isSelected ? 'bg-zinc-900/40' : 'hover:bg-zinc-900/20',
+                            )}
+                            key={bot.id}
+                          >
+                            <td className="px-5 py-4">
+                              <button
+                                className="flex items-center gap-3 text-left"
+                                type="button"
+                                onClick={() => setSelectedStrategy(bot.key)}
+                              >
+                                <div
+                                  className={cx(
+                                    'flex h-8 w-8 items-center justify-center rounded-md border',
+                                    tone.box,
+                                  )}
+                                >
+                                  <Icon className={tone.icon} icon={bot.icon} width={16} height={16} />
+                                </div>
+                                <div>
+                                  <div className="font-medium text-zinc-200">{bot.name}</div>
+                                  <div className="text-xs text-zinc-500">Uptime: {bot.uptime}</div>
+                                </div>
+                              </button>
+                            </td>
+                            <td className="px-5 py-4">
+                              <div className="text-zinc-300">{bot.pair}</div>
+                              <div className="text-xs text-zinc-500">{bot.exchange}</div>
+                            </td>
+                            <td className="px-5 py-4 text-zinc-400">{bot.strategy}</td>
+                            <td className="px-5 py-4 text-right">
+                              <div className="font-medium text-emerald-400">
+                                {bot.pnl > 0 ? '+' : ''}
+                                {formatCurrency(bot.pnl)}
                               </div>
-                              <div>
-                                <div style={{ fontWeight: 500, color: bot.status === 'stopped' ? '#a1a1aa' : '#e4e4e7' }}>{bot.name}</div>
-                                <div style={{ fontSize: '0.75rem', color: '#71717a' }}>Uptime: {bot.uptime}</div>
+                              <div className="text-xs text-emerald-400/80">
+                                {bot.pnlPercent > 0 ? '+' : ''}
+                                {bot.pnlPercent}%
                               </div>
-                            </div>
-                          </td>
-                          <td style={{ padding: '16px 20px' }}>
-                            <div style={{ fontWeight: 400, color: bot.status === 'stopped' ? '#71717a' : '#d4d4d8' }}>{bot.pair}</div>
-                            <div style={{ fontSize: '0.75rem', color: '#71717a' }}>{bot.exchange}</div>
-                          </td>
-                          <td style={{ padding: '16px 20px', color: bot.status === 'stopped' ? '#71717a' : '#a1a1aa', fontWeight: 400, fontSize: '0.75rem' }}>
-                            {bot.strategy}
-                          </td>
-                          <td style={{ padding: '16px 20px', textAlign: 'right' }}>
-                            <div style={{ fontWeight: 500, color: bot.pnl >= 0 ? '#34d399' : '#fb7185' }}>
-                              {bot.pnl >= 0 ? '+' : ''}{formatCurrency(bot.pnl)}
-                            </div>
-                            <div style={{ fontSize: '0.75rem', color: bot.pnl >= 0 ? 'rgba(52, 211, 153, 0.7)' : 'rgba(251, 113, 133, 0.7)' }}>
-                              {bot.pnl >= 0 ? '+' : ''}{bot.pnlPercent}%
-                            </div>
-                          </td>
-                          <td style={{ padding: '16px 20px', textAlign: 'center' }}>
-                            <label style={{
-                              position: 'relative',
-                              display: 'inline-flex',
-                              alignItems: 'center',
-                              cursor: 'pointer',
-                            }}>
-                              <input
-                                type="checkbox"
-                                checked={bot.status === 'running'}
-                                onChange={() => {}}
-                                style={{ position: 'absolute', opacity: 0, width: 0, height: 0 }}
-                              />
-                              <div style={{
-                                width: '32px',
-                                height: '16px',
-                                backgroundColor: bot.status === 'running' ? '#d4d4d8' : '#27272a',
-                                borderRadius: '9999px',
-                                position: 'relative',
-                                transition: 'background-color 0.15s ease',
-                              }}>
-                                <div style={{
-                                  width: '12px',
-                                  height: '12px',
-                                  backgroundColor: bot.status === 'running' ? '#09090b' : '#71717a',
-                                  borderRadius: '9999px',
-                                  position: 'absolute',
-                                  top: '2px',
-                                  left: bot.status === 'running' ? '18px' : '2px',
-                                  transition: 'all 0.15s ease',
-                                  border: `1px solid ${bot.status === 'running' ? '#09090b' : '#71717a'}`,
-                                }} />
-                              </div>
-                            </label>
-                          </td>
-                          <td style={{ padding: '16px 20px', textAlign: 'right' }}>
-                            <button style={{
-                              backgroundColor: 'transparent',
-                              border: 'none',
-                              color: '#71717a',
-                              cursor: 'pointer',
-                              padding: '4px',
-                            }}>
-                              <Icon icon="solar:menu-dots-linear" width={18} height={18} />
-                            </button>
-                          </td>
-                        </tr>
-                      ))}
+                            </td>
+                            <td className="px-5 py-4 text-center">
+                              <button
+                                aria-checked={bot.status === 'running'}
+                                aria-label={`${bot.name} status`}
+                                className={cx(
+                                  'relative inline-flex h-5 w-9 rounded-full transition-colors',
+                                  bot.status === 'running' ? 'bg-zinc-200' : 'bg-zinc-800',
+                                )}
+                                role="switch"
+                                type="button"
+                              >
+                                <span
+                                  className={cx(
+                                    'absolute top-0.5 h-4 w-4 rounded-full border transition-all',
+                                    bot.status === 'running'
+                                      ? 'left-[18px] border-zinc-950 bg-zinc-950'
+                                      : 'left-0.5 border-zinc-600 bg-zinc-500',
+                                  )}
+                                />
+                              </button>
+                            </td>
+                            <td className="px-5 py-4 text-right">
+                              <button className="p-1 text-zinc-500 transition-colors hover:text-zinc-300" type="button">
+                                <Icon icon="solar:menu-dots-linear" width={18} height={18} />
+                              </button>
+                            </td>
+                          </tr>
+                        )
+                      })}
                     </tbody>
                   </table>
                 </div>
-                <div style={{
-                  padding: '12px 20px',
-                  borderTop: '1px solid rgba(39, 39, 42, 0.5)',
-                  backgroundColor: 'rgba(24, 24, 27, 0.1)',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                }}>
-                  <Link
-                    to="/bots"
-                    style={{
-                      fontSize: '0.75rem',
-                      color: '#a1a1aa',
-                      textDecoration: 'none',
-                      fontWeight: 400,
-                      transition: 'color 0.15s ease',
-                    }}
-                  >
+                <div className="flex items-center justify-center border-t border-zinc-800/50 bg-zinc-900/10 px-5 py-3">
+                  <Link className="text-xs font-normal text-zinc-400 transition-colors hover:text-zinc-200" to="/bots">
                     View All Strategies
                   </Link>
                 </div>
               </div>
             </div>
 
-            {/* System Event Log */}
-            <div style={{ display: 'flex', flexDirection: 'column' }}>
-              <h2 style={{
-                fontSize: '1rem',
-                fontWeight: 500,
-                color: '#fafafa',
-                letterSpacing: '-0.025em',
-                margin: '0 0 16px',
-              }}>System Event Log</h2>
-              <div style={{
-                backgroundColor: 'rgba(24, 24, 27, 0.3)',
-                border: '1px solid rgba(39, 39, 42, 0.5)',
-                borderRadius: '12px',
-                padding: '20px',
-                flex: 1,
-                display: 'flex',
-                flexDirection: 'column',
-                height: '380px',
-              }}>
-                <div style={{
-                  flex: 1,
-                  overflowY: 'auto',
-                  paddingRight: '8px',
-                  display: 'flex',
-                  flexDirection: 'column',
-                  gap: '16px',
-                  fontSize: '0.875rem',
-                  fontWeight: 400,
-                  position: 'relative',
-                }}>
-                  {/* Gradient fade at top */}
-                  <div style={{
-                    position: 'absolute',
-                    left: 0,
-                    right: '8px',
-                    top: 0,
-                    height: '16px',
-                    background: 'linear-gradient(to bottom, rgba(24, 24, 27, 0.3), transparent)',
-                    pointerEvents: 'none',
-                  }} />
-                  
-                  {activityLog.map((log) => (
-                    <div key={log.id} style={{ display: 'flex', gap: '12px', alignItems: 'flex-start' }}>
-                      <div style={{
-                        marginTop: '2px',
-                        color: log.color === 'emerald' ? '#34d399' : log.color === 'blue' ? '#60a5fa' : log.color === 'rose' ? '#fb7185' : '#71717a',
-                      }}>
-                        <Icon icon={log.icon} width={20} height={20} />
-                      </div>
-                      <div>
-                        <p style={{
-                          color: '#d4d4d8',
-                          lineHeight: 1.6,
-                          margin: 0,
-                        }}>
-                          <span style={{ color: '#fafafa', fontWeight: 500 }}>{log.title}</span>
-                          {' '}{log.action && <span style={{ color: log.action === 'BUY' ? '#34d399' : '#fb7185' }}>{log.action}</span>}{' '}
-                          {log.detail}
-                          {log.profit && (
-                            <><br /><span style={{ fontSize: '0.75rem', color: '#34d399' }}>Profit: +${log.profit}</span></>
+            <div className="flex flex-col">
+              <h2 className="mb-4 text-base font-medium tracking-tight text-zinc-100">System Event Log</h2>
+              <div className="flex h-full min-h-[24rem] flex-col rounded-xl border border-zinc-800/50 bg-zinc-900/30 p-5">
+                <div className="relative flex-1 space-y-4 overflow-y-auto pr-2 text-sm font-normal">
+                  <div className="pointer-events-none absolute left-0 right-2 top-0 h-4 bg-gradient-to-b from-zinc-900/80 to-transparent" />
+                  {filteredActivityLog.length ? (
+                    filteredActivityLog.map((log) => (
+                      <div className="group flex items-start gap-3" key={log.id}>
+                        <div
+                          className={cx(
+                            'mt-0.5',
+                            log.color === 'emerald'
+                              ? 'text-emerald-400'
+                              : log.color === 'blue'
+                                ? 'text-blue-400'
+                                : log.color === 'rose'
+                                  ? 'text-rose-400'
+                                  : 'text-zinc-500',
                           )}
-                        </p>
-                        <p style={{
-                          fontSize: '0.75rem',
-                          color: '#71717a',
-                          margin: '2px 0 0',
-                        }}>{log.time}</p>
+                        >
+                          <Icon icon={log.icon} width={18} height={18} />
+                        </div>
+                        <div>
+                          <p className="leading-relaxed text-zinc-300">
+                            <span className="font-medium text-zinc-100">{log.title}</span>{' '}
+                            {log.action ? (
+                              <span className={log.action === 'BUY' ? 'text-emerald-400' : 'text-rose-400'}>
+                                {log.action}
+                              </span>
+                            ) : null}{' '}
+                            {log.detail}
+                            {log.profit ? (
+                              <>
+                                <br />
+                                <span className="text-xs text-emerald-400">Profit: +${log.profit}</span>
+                              </>
+                            ) : null}
+                          </p>
+                          <p className="mt-0.5 text-xs text-zinc-500">{log.time}</p>
+                        </div>
                       </div>
-                    </div>
-                  ))}
+                    ))
+                  ) : (
+                    <p className="text-sm text-zinc-500">No logs match your search.</p>
+                  )}
                 </div>
-                <div style={{
-                  marginTop: '16px',
-                  paddingTop: '16px',
-                  borderTop: '1px solid rgba(39, 39, 42, 0.5)',
-                }}>
-                  {/* Search Input */}
-                  <div style={{ position: 'relative' }}>
-                    <Icon 
-                      icon="solar:magnifer-linear" 
-                      width={18} 
-                      height={18} 
-                      style={{
-                        position: 'absolute',
-                        left: '12px',
-                        top: '50%',
-                        transform: 'translateY(-50%)',
-                        color: '#71717a',
-                      }}
+
+                <div className="mt-4 border-t border-zinc-800/50 pt-4">
+                  <div className="relative">
+                    <Icon
+                      className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-zinc-500"
+                      icon="solar:magnifer-linear"
+                      width={16}
+                      height={16}
                     />
                     <input
+                      aria-label="Search logs"
+                      className="w-full rounded-md border border-zinc-800 bg-zinc-900/50 py-1.5 pl-9 pr-3 text-xs text-zinc-200 outline-none transition focus:border-zinc-600 focus:ring-1 focus:ring-zinc-600"
+                      placeholder="Search logs..."
                       type="text"
                       value={searchValue}
-                      onChange={(e) => setSearchValue(e.target.value)}
-                      placeholder="Search logs..."
-                      style={{
-                        width: '100%',
-                        backgroundColor: 'rgba(24, 24, 27, 0.5)',
-                        border: '1px solid #27272a',
-                        borderRadius: '6px',
-                        padding: '6px 12px 6px 36px',
-                        fontSize: '0.75rem',
-                        color: '#e4e4e7',
-                        outline: 'none',
-                        transition: 'all 0.15s ease',
-                      }}
+                      onChange={(event) => setSearchValue(event.target.value)}
                     />
                   </div>
                 </div>
@@ -1394,95 +892,94 @@ function DashboardPage() {
             </div>
           </div>
 
-          {/* Action Buttons */}
-          <div style={{
-            display: 'flex',
-            flexWrap: 'wrap',
-            gap: '12px',
-            padding: '16px',
-            backgroundColor: 'rgba(24, 24, 27, 0.4)',
-            border: '1px solid rgba(39, 39, 42, 0.6)',
-            borderRadius: '12px',
-          }}>
-            <button
-              onClick={() => void handlePaperRun()}
-              disabled={isRunningBot}
-              style={{
-                display: 'inline-flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                minHeight: '44px',
-                padding: '0 20px',
-                borderRadius: '8px',
-                border: 'none',
-                background: 'linear-gradient(135deg, #f59e0b, #fbbf24)',
-                color: '#1c1611',
-                fontWeight: 600,
-                cursor: isRunningBot ? 'progress' : 'pointer',
-                opacity: isRunningBot ? 0.7 : 1,
-                boxShadow: '0 8px 16px rgba(245, 158, 11, 0.25)',
-                transition: 'all 0.15s ease',
-              }}
-            >
-              {isRunningBot ? 'Running paper bot...' : `Start ${strategyLabels[selectedBot.key]}`}
-            </button>
-            <button
-              onClick={() => void handleBacktest()}
-              disabled={isBacktesting}
-              style={{
-                display: 'inline-flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                minHeight: '44px',
-                padding: '0 20px',
-                borderRadius: '8px',
-                border: 'none',
-                background: 'linear-gradient(135deg, #059669, #10b981)',
-                color: '#fff',
-                fontWeight: 600,
-                cursor: isBacktesting ? 'progress' : 'pointer',
-                opacity: isBacktesting ? 0.7 : 1,
-                boxShadow: '0 8px 16px rgba(5, 150, 105, 0.2)',
-                transition: 'all 0.15s ease',
-              }}
-            >
-              {isBacktesting ? 'Backtesting...' : 'Run backtest'}
-            </button>
-            <button
-              onClick={() => void handleRefresh()}
-              disabled={isRefreshing}
-              style={{
-                display: 'inline-flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                minHeight: '44px',
-                padding: '0 20px',
-                borderRadius: '8px',
-                border: '1px solid rgba(39, 39, 42, 0.6)',
-                backgroundColor: 'rgba(255, 255, 255, 0.1)',
-                color: '#d4d4d8',
-                fontWeight: 600,
-                cursor: isRefreshing ? 'progress' : 'pointer',
-                opacity: isRefreshing ? 0.7 : 1,
-                transition: 'all 0.15s ease',
-              }}
-            >
-              {isRefreshing ? 'Refreshing...' : 'Refresh data'}
-            </button>
+          <div className="rounded-xl border border-zinc-800/60 bg-zinc-900/40 p-4">
+            <div className="mb-4 flex flex-col gap-3 border-b border-zinc-800/60 pb-4 lg:flex-row lg:items-center lg:justify-between">
+              <div>
+                <h2 className="text-base font-medium tracking-tight text-zinc-100">Control Deck</h2>
+                <p className="mt-1 text-xs text-zinc-500">
+                  Selected strategy: {selectedBot ? strategyLabels[selectedBot.key] : 'Unavailable'} ·
+                  last paper run {formatTimeAgo(dashboard.lastPaperRunAt)}
+                </p>
+              </div>
+              <div className="flex flex-wrap gap-2">
+                {dashboard.bots.map((bot) => (
+                  <button
+                    className={cx(
+                      'rounded-full border px-3 py-1.5 text-xs font-medium transition-colors',
+                      bot.key === selectedStrategy
+                        ? 'border-zinc-700 bg-zinc-100 text-zinc-900'
+                        : 'border-zinc-800 bg-zinc-900 text-zinc-400 hover:border-zinc-700 hover:text-zinc-200',
+                    )}
+                    key={bot.key}
+                    type="button"
+                    onClick={() => setSelectedStrategy(bot.key)}
+                  >
+                    {strategyLabels[bot.key]}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            <div className="grid gap-4 lg:grid-cols-[1.3fr_auto] lg:items-center">
+              <div className="grid gap-3 sm:grid-cols-3">
+                <div className="rounded-lg border border-zinc-800 bg-zinc-950/60 p-4">
+                  <p className="text-[11px] uppercase tracking-[0.2em] text-zinc-500">Paper PnL</p>
+                  <p className="mt-2 text-lg font-medium text-emerald-400">
+                    +{selectedBot ? selectedBot.paperPnlPct.toFixed(2) : '0.00'}%
+                  </p>
+                </div>
+                <div className="rounded-lg border border-zinc-800 bg-zinc-950/60 p-4">
+                  <p className="text-[11px] uppercase tracking-[0.2em] text-zinc-500">Win Rate</p>
+                  <p className="mt-2 text-lg font-medium text-zinc-100">
+                    {selectedBot ? selectedBot.winRatePct.toFixed(1) : '0.0'}%
+                  </p>
+                </div>
+                <div className="rounded-lg border border-zinc-800 bg-zinc-950/60 p-4">
+                  <p className="text-[11px] uppercase tracking-[0.2em] text-zinc-500">Allocation</p>
+                  <p className="mt-2 text-lg font-medium text-zinc-100">
+                    {selectedBot ? selectedBot.allocationPct : 0}%
+                  </p>
+                </div>
+              </div>
+
+              <div className="flex flex-wrap gap-3 lg:justify-end">
+                <button
+                  className="inline-flex min-h-11 items-center justify-center rounded-lg bg-amber-400 px-5 text-sm font-semibold text-zinc-950 shadow-[0_10px_30px_rgba(251,191,36,0.2)] transition hover:bg-amber-300 disabled:cursor-progress disabled:opacity-70"
+                  disabled={isRunningBot}
+                  type="button"
+                  onClick={() => {
+                    void handlePaperRun()
+                  }}
+                >
+                  {isRunningBot
+                    ? 'Running paper bot...'
+                    : `Start ${selectedBot ? strategyLabels[selectedBot.key] : 'Strategy'}`}
+                </button>
+                <button
+                  className="inline-flex min-h-11 items-center justify-center rounded-lg bg-emerald-500 px-5 text-sm font-semibold text-white shadow-[0_10px_30px_rgba(16,185,129,0.18)] transition hover:bg-emerald-400 disabled:cursor-progress disabled:opacity-70"
+                  disabled={isBacktesting}
+                  type="button"
+                  onClick={() => {
+                    void handleBacktest()
+                  }}
+                >
+                  {isBacktesting ? 'Backtesting...' : 'Run backtest'}
+                </button>
+                <button
+                  className="inline-flex min-h-11 items-center justify-center rounded-lg border border-zinc-700 bg-white/5 px-5 text-sm font-semibold text-zinc-200 transition hover:bg-white/10 disabled:cursor-progress disabled:opacity-70"
+                  disabled={isRefreshing}
+                  type="button"
+                  onClick={() => {
+                    void handleRefresh()
+                  }}
+                >
+                  {isRefreshing ? 'Refreshing...' : 'Refresh data'}
+                </button>
+              </div>
+            </div>
           </div>
         </div>
       </main>
-
-      <style>{`
-        @keyframes pulse {
-          0%, 100% {
-            opacity: 1;
-          }
-          50% {
-            opacity: 0.5;
-          }
-        }
-      `}</style>
     </div>
   )
 }
