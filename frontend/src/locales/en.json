@@ -1,0 +1,46 @@
+{
+  "settings": {
+    "title": "Settings",
+    "description": "Manage your preferences, notifications, and regional settings",
+    "header": "Settings"
+  },
+  "appearance": {
+    "title": "Appearance",
+    "description": "Choose how Nexus looks to you",
+    "system": "System",
+    "light": "Light",
+    "dark": "Dark",
+    "systemNote": "System setting will automatically match your device's color scheme preference"
+  },
+  "notifications": {
+    "title": "Notifications",
+    "description": "Control how you receive alerts and updates",
+    "pushNotifications": "Push Notifications",
+    "pushDescription": "Get notified about important trading events",
+    "enabled": "Enabled",
+    "disabled": "Disabled"
+  },
+  "language": {
+    "title": "Language",
+    "description": "Select your preferred language"
+  },
+  "timezone": {
+    "title": "Timezone",
+    "description": "Set your local timezone"
+  },
+  "currentConfig": {
+    "title": "Current Configuration",
+    "theme": "Theme",
+    "notifications": "Notifications",
+    "language": "Language",
+    "timezone": "Timezone"
+  },
+  "version": {
+    "title": "Nexus Trading Bot",
+    "autoSave": "Settings are automatically saved to your browser"
+  },
+  "languages": {
+    "en": "English",
+    "th": "ไทย"
+  }
+}

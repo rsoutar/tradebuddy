@@ -144,7 +144,12 @@ export function ProtectedShell({
             System
           </p>
           {protectedSystemItems.map((item) => (
-            <SidebarItem item={item} key={item.id} onClick={() => setIsMenuOpen(false)} />
+            <SidebarItem
+              active={item.id === activeNavId}
+              item={item}
+              key={item.id}
+              onClick={() => setIsMenuOpen(false)}
+            />
           ))}
         </nav>
 
@@ -218,9 +223,7 @@ export function ProtectedShell({
             className="relative z-30 flex w-full items-center gap-3 rounded-xl border border-zinc-800 bg-zinc-900/80 p-2.5 text-left transition hover:border-zinc-700 hover:bg-zinc-900"
             disabled={isLoggingOut}
             type="button"
-            onClick={() => {
-              setIsProfileMenuOpen((current) => !current)
-            }}
+            onClick={() => setIsProfileMenuOpen((current) => !current)}
           >
             {viewer.pictureUrl ? (
               <img

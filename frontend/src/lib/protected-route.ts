@@ -1,7 +1,7 @@
 import { redirect } from '@tanstack/react-router'
 import { getViewer, type LineUserProfile } from './session'
 
-export type ProtectedNavId = 'dashboard' | 'bots' | 'backtest' | 'history' | 'ai'
+export type ProtectedNavId = 'dashboard' | 'bots' | 'backtest' | 'history' | 'ai' | 'settings'
 
 export const protectedNavigationItems: Array<{
   id: ProtectedNavId
@@ -23,10 +23,10 @@ export const protectedConnectionItems = [
 
 export const protectedSystemItems = [
   { id: 'logs', label: 'System Logs', icon: 'solar:document-text-linear' },
-  { id: 'settings', label: 'Settings', icon: 'solar:settings-linear', to: '/onboarding' },
+  { id: 'settings', label: 'Settings', icon: 'solar:settings-linear', to: '/settings' },
 ]
 
-const protectedRoutePaths = new Set(['/dashboard', '/backtest', '/history', '/bots', '/ai'])
+const protectedRoutePaths = new Set(['/dashboard', '/backtest', '/history', '/bots', '/ai', '/settings'])
 
 export function isProtectedPathname(pathname: string) {
   return protectedRoutePaths.has(pathname)
