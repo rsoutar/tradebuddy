@@ -39,6 +39,10 @@ class DepositRequest(UserScopedRequest):
     amount_usd: float = Field(gt=0)
 
 
+class BotControlRequest(UserScopedRequest):
+    pass
+
+
 def create_api(trading_app: Optional[TradingBotApp] = None) -> FastAPI:
     app_state = trading_app or create_app()
     api = FastAPI(
@@ -84,6 +88,13 @@ def create_api(trading_app: Optional[TradingBotApp] = None) -> FastAPI:
     ) -> dict:
         return app_state.trade_history(user_id=user_id, user_name=user_name)
 
+    @api.get("/api/bots/history")
+    def get_bot_activity(
+        user_id: str = Query(default="demo-user"),
+        user_name: str = Query(default="Demo Trader"),
+    ) -> dict:
+        return app_state.bot_activity(user_id=user_id, user_name=user_name)
+
     @api.get("/api/strategies/{strategy}")
     def get_strategy_preview(strategy: StrategyType) -> dict:
         return app_state.demo_strategy(strategy)
@@ -104,6 +115,28 @@ def create_api(trading_app: Optional[TradingBotApp] = None) -> FastAPI:
                 user_id=payload.user_id,
                 user_name=payload.user_name,
                 grid_config=payload.grid_config.model_dump() if payload.grid_config else None,
+            )
+        except ValueError as error:
+            raise HTTPException(status_code=400, detail=str(error)) from error
+
+    @api.post("/api/bots/{bot_id}/start")
+    def start_bot(bot_id: str, payload: BotControlRequest) -> dict:
+        try:
+            return app_state.start_bot(
+                bot_id,
+                user_id=payload.user_id,
+                user_name=payload.user_name,
+            )
+        except ValueError as error:
+            raise HTTPException(status_code=400, detail=str(error)) from error
+
+    @api.post("/api/bots/{bot_id}/stop")
+    def stop_bot(bot_id: str, payload: BotControlRequest) -> dict:
+        try:
+            return app_state.stop_bot(
+                bot_id,
+                user_id=payload.user_id,
+                user_name=payload.user_name,
             )
         except ValueError as error:
             raise HTTPException(status_code=400, detail=str(error)) from error

@@ -7,6 +7,7 @@ from dataclasses import asdict
 from trading_bot.app import create_app
 from trading_bot.models import StrategyType
 from trading_bot.settings import load_settings
+from trading_bot.worker import BotWorkerRunner
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -30,6 +31,9 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Enable auto-reload for local development",
     )
+
+    worker_parser = subparsers.add_parser("run-bot", help="Run a single bot worker process")
+    worker_parser.add_argument("--bot-id", required=True, help="Persisted bot instance id")
     return parser
 
 
@@ -61,6 +65,11 @@ def main() -> None:
             port=args.port or settings.api.port,
             reload=args.reload,
         )
+        return
+
+    if args.command == "run-bot":
+        runner = BotWorkerRunner(args.bot_id)
+        runner.run()
         return
 
     parser.error(f"Unknown command: {args.command}")

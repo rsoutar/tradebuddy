@@ -1,32 +1,11 @@
 import { useMemo, useState } from 'react'
 import type { FormEvent, ReactNode } from 'react'
-import { Link, createFileRoute, redirect } from '@tanstack/react-router'
+import { Link, createFileRoute } from '@tanstack/react-router'
 import { Icon } from '@iconify/react'
+import { ProtectedMenuButton, ProtectedShell } from '../components/protected-shell'
+import { requireAuthenticatedViewer } from '../lib/protected-route'
 import type { DashboardState, StrategyKey } from '../lib/session'
-import {
-  createBot,
-  depositPaperFunds,
-  getDashboard,
-  getViewer,
-  logoutViewer,
-} from '../lib/session'
-
-const navigationItems = [
-  { id: 'dashboard', label: 'Dashboard', icon: 'solar:widget-5-linear', to: '/dashboard' },
-  { id: 'bots', label: 'Active Bots', icon: 'solar:cpu-linear', to: '/bots' },
-  { id: 'backtest', label: 'Backtesting', icon: 'solar:chart-square-linear' },
-  { id: 'history', label: 'Trade History', icon: 'solar:history-linear', to: '/history' },
-]
-
-const connectionItems = [
-  { id: 'exchanges', label: 'Exchanges', icon: 'solar:wallet-money-linear' },
-  { id: 'api', label: 'API Keys', icon: 'solar:key-square-linear' },
-]
-
-const systemItems = [
-  { id: 'logs', label: 'System Logs', icon: 'solar:document-text-linear' },
-  { id: 'settings', label: 'Settings', icon: 'solar:settings-linear', to: '/onboarding' },
-]
+import { createBot, depositPaperFunds, getDashboard } from '../lib/session'
 
 const strategyLabels: Record<StrategyKey, string> = {
   grid: 'Grid Bot',
@@ -94,12 +73,7 @@ const dateTimeFormatter = new Intl.DateTimeFormat('en-US', {
 
 export const Route = createFileRoute('/dashboard')({
   beforeLoad: async () => {
-    const viewer = await getViewer()
-
-    if (!viewer.authenticated) {
-      // @ts-expect-error - Router type issue
-      throw redirect({ to: '/' })
-    }
+    await requireAuthenticatedViewer()
   },
   staleTime: 60_000,
   preloadStaleTime: 60_000,
@@ -185,49 +159,6 @@ function strategyTone(strategy: StrategyKey) {
   }
 }
 
-function SidebarItem({
-  item,
-  active = false,
-  onClick,
-}: {
-  item: { label: string; icon: string; to?: string; badge?: string }
-  active?: boolean
-  onClick?: () => void
-}) {
-  const content = (
-    <>
-      <Icon icon={item.icon} width={18} height={18} className="shrink-0" />
-      <span>{item.label}</span>
-      {item.badge ? (
-        <span className="ml-auto rounded-full bg-zinc-800 px-2 py-0.5 text-xs text-zinc-300">
-          {item.badge}
-        </span>
-      ) : null}
-    </>
-  )
-
-  const classes = cx(
-    'flex items-center gap-3 rounded-md px-3 py-2 text-sm transition-colors',
-    active
-      ? 'bg-zinc-800/50 text-zinc-100'
-      : 'text-zinc-400 hover:bg-zinc-800/30 hover:text-zinc-100',
-  )
-
-  if (item.to) {
-    return (
-      <Link className={classes} to={item.to} onClick={onClick}>
-        {content}
-      </Link>
-    )
-  }
-
-  return (
-    <button className={cx(classes, 'w-full text-left')} type="button" onClick={onClick}>
-      {content}
-    </button>
-  )
-}
-
 function MetricCard({
   label,
   labelAction,
@@ -289,10 +220,7 @@ function MetricCard({
 function DashboardPage() {
   const loaderData = Route.useLoaderData()
   const [dashboard, setDashboard] = useState<DashboardState>(loaderData.dashboard)
-  const [isMenuOpen, setIsMenuOpen] = useState(false)
   const [isRefreshing, setIsRefreshing] = useState(false)
-  const [isLoggingOut, setIsLoggingOut] = useState(false)
-  const [isProfileMenuOpen, setIsProfileMenuOpen] = useState(false)
   const [isDepositModalOpen, setIsDepositModalOpen] = useState(false)
   const [isCreateBotModalOpen, setIsCreateBotModalOpen] = useState(false)
   const [selectedBotType, setSelectedBotType] = useState<StrategyKey>('grid')
@@ -309,8 +237,6 @@ function DashboardPage() {
   const [isDepositing, setIsDepositing] = useState(false)
   const [actionError, setActionError] = useState<string>()
   const [searchValue, setSearchValue] = useState('')
-  const viewerSubtitle =
-    loaderData.viewer.statusMessage || `@${loaderData.viewer.userId.slice(0, 10)}`
 
   const activeBots = dashboard.activeStrategies.length
   const alertCount = dashboard.events.filter((event) => event.tone !== 'neutral').length
@@ -380,16 +306,6 @@ function DashboardPage() {
       `${log.title} ${log.detail} ${log.time}`.toLowerCase().includes(needle),
     )
   }, [activityLog, searchValue])
-
-  async function handleLogout() {
-    try {
-      setIsLoggingOut(true)
-      await logoutViewer()
-      window.location.assign('/')
-    } finally {
-      setIsLoggingOut(false)
-    }
-  }
 
   async function handleRefresh() {
     try {
@@ -507,210 +423,48 @@ function DashboardPage() {
   }
 
   return (
-    <div
-      className="flex h-screen overflow-hidden bg-zinc-950 text-zinc-300 font-sans antialiased selection:bg-zinc-800 selection:text-zinc-100"
-      style={{ backgroundImage: 'radial-gradient(circle at 50% 0%, #18181b 0%, #09090b 100%)' }}
-    >
-      {isMenuOpen ? (
-        <button
-          aria-label="Close navigation"
-          className="fixed inset-0 z-20 bg-black/50 md:hidden"
-          type="button"
-          onClick={() => setIsMenuOpen(false)}
-        />
-      ) : null}
-
-      <aside
-        className={cx(
-          'fixed inset-y-0 left-0 z-30 flex w-64 flex-col border-r border-zinc-800/60 bg-zinc-950/50 backdrop-blur-xl transition-transform duration-300 md:static md:z-20 md:translate-x-0',
-          isMenuOpen ? 'translate-x-0' : '-translate-x-full',
-        )}
-      >
-        <div className="flex h-16 items-center border-b border-zinc-800/60 px-6">
-          <span className="text-lg font-medium uppercase tracking-tighter text-zinc-100">Nexus</span>
-          <span className="ml-2 rounded bg-zinc-800 px-1.5 py-0.5 text-xs font-normal text-zinc-400">
-            v2.4
-          </span>
-        </div>
-
-        <nav className="flex-1 space-y-1 overflow-y-auto px-3 py-4 text-sm font-normal">
-          <p className="mb-2 mt-4 px-3 text-xs font-normal uppercase tracking-widest text-zinc-500">
-            Platform
-          </p>
-          {navigationItems.map((item) => (
-            <SidebarItem
-              active={item.id === 'dashboard'}
-              item={item}
-              key={item.id}
-              onClick={() => setIsMenuOpen(false)}
-            />
-          ))}
-
-          <p className="mb-2 mt-8 px-3 text-xs font-normal uppercase tracking-widest text-zinc-500">
-            Connections
-          </p>
-          {connectionItems.map((item) => (
-            <SidebarItem item={item} key={item.id} />
-          ))}
-
-          <p className="mb-2 mt-8 px-3 text-xs font-normal uppercase tracking-widest text-zinc-500">
-            System
-          </p>
-          {systemItems.map((item) => (
-            <SidebarItem item={item} key={item.id} onClick={() => setIsMenuOpen(false)} />
-          ))}
-        </nav>
-
-        <div className="relative border-t border-zinc-800/60 p-4">
-          {isProfileMenuOpen ? (
-            <button
-              aria-label="Close profile menu"
-              className="fixed inset-0 z-20"
-              type="button"
-              onClick={() => setIsProfileMenuOpen(false)}
-            />
-          ) : null}
-
-          {isProfileMenuOpen ? (
-            <div className="absolute bottom-[calc(100%-0.5rem)] left-4 right-4 z-30 overflow-hidden rounded-2xl border border-zinc-800 bg-zinc-950 shadow-2xl shadow-black/50">
-              <div className="flex items-center gap-3 border-b border-zinc-800/80 px-4 py-4">
-                {loaderData.viewer.pictureUrl ? (
-                  <img
-                    alt={`${loaderData.viewer.displayName} avatar`}
-                    className="h-11 w-11 rounded-xl object-cover ring-1 ring-zinc-700/70"
-                    src={loaderData.viewer.pictureUrl}
-                  />
-                ) : (
-                  <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-zinc-800 text-sm font-semibold text-zinc-100 ring-1 ring-zinc-700/70">
-                    {loaderData.viewer.displayName.slice(0, 2).toUpperCase()}
-                  </div>
-                )}
-                <div className="min-w-0">
-                  <p className="truncate text-sm font-medium text-zinc-100">
-                    {loaderData.viewer.displayName}
-                  </p>
-                  <p className="truncate text-xs text-zinc-500">{viewerSubtitle}</p>
-                </div>
-              </div>
-
-              <div className="p-2">
-                {[
-                  { label: 'Account', icon: 'solar:user-circle-linear' },
-                  { label: 'Billing', icon: 'solar:wallet-money-linear' },
-                  { label: 'Notifications', icon: 'solar:bell-linear' },
-                ].map((item) => (
-                  <button
-                    className="flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left text-sm text-zinc-300 transition hover:bg-zinc-900 hover:text-zinc-100"
-                    key={item.label}
-                    type="button"
-                    onClick={() => setIsProfileMenuOpen(false)}
-                  >
-                    <Icon icon={item.icon} width={17} height={17} className="text-zinc-500" />
-                    <span>{item.label}</span>
-                  </button>
-                ))}
-
-                <div className="my-2 border-t border-zinc-800/80" />
-
+    <>
+      <ProtectedShell
+        activeNavId="dashboard"
+        viewer={loaderData.viewer}
+        header={({ openMenu }) => (
+          <>
+            <div className="flex items-center gap-4">
+              <ProtectedMenuButton onClick={openMenu} />
+              <h1 className="hidden text-lg font-medium tracking-tight text-zinc-100 sm:block">
+                Overview
+              </h1>
+              <div className="hidden items-center rounded-md border border-zinc-800 bg-zinc-900 p-0.5 sm:flex">
                 <button
-                  className="flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left text-sm text-zinc-300 transition hover:bg-rose-500/10 hover:text-rose-200"
-                  disabled={isLoggingOut}
+                  className="rounded px-3 py-1 text-xs font-normal text-zinc-400 transition-colors hover:text-zinc-200"
                   type="button"
-                  onClick={() => {
-                    setIsProfileMenuOpen(false)
-                    void handleLogout()
-                  }}
                 >
-                  <Icon icon="solar:logout-2-linear" width={17} height={17} className="text-zinc-500" />
-                  <span>{isLoggingOut ? 'Logging out...' : 'Log out'}</span>
+                  Testnet
+                </button>
+                <button
+                  className="rounded border border-zinc-700/50 bg-zinc-800 px-3 py-1 text-xs font-normal text-zinc-100 shadow-sm"
+                  type="button"
+                >
+                  Live
                 </button>
               </div>
             </div>
-          ) : null}
 
-          <button
-            aria-expanded={isProfileMenuOpen}
-            className="relative z-30 flex w-full items-center gap-3 rounded-xl border border-zinc-800 bg-zinc-900/80 p-2.5 text-left transition hover:border-zinc-700 hover:bg-zinc-900"
-            disabled={isLoggingOut}
-            type="button"
-            onClick={() => {
-              setIsProfileMenuOpen((current) => !current)
-            }}
-          >
-            {loaderData.viewer.pictureUrl ? (
-              <img
-                alt={`${loaderData.viewer.displayName} avatar`}
-                className="h-10 w-10 rounded-xl object-cover ring-1 ring-zinc-700/70"
-                src={loaderData.viewer.pictureUrl}
-              />
-            ) : (
-              <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-zinc-800 text-sm font-semibold text-zinc-100 ring-1 ring-zinc-700/70">
-                {loaderData.viewer.displayName.slice(0, 2).toUpperCase()}
+            <div className="flex items-center gap-4">
+              <div className="hidden items-center gap-2 rounded-full border border-emerald-900/30 bg-emerald-900/10 px-3 py-1.5 text-xs font-normal text-emerald-500 sm:flex">
+                <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-emerald-500" />
+                Binance API Connected
               </div>
-            )}
-            <div className="min-w-0 flex-1 overflow-hidden">
-              <p className="truncate text-sm font-medium text-zinc-100">
-                {loaderData.viewer.displayName}
-              </p>
-              <p className="truncate text-xs text-zinc-500">{viewerSubtitle}</p>
-            </div>
-            <Icon
-              icon="solar:menu-dots-bold"
-              width={18}
-              height={18}
-              className={cx(
-                'shrink-0 text-zinc-500 transition-colors',
-                isProfileMenuOpen && 'text-zinc-300',
-              )}
-            />
-          </button>
-        </div>
-      </aside>
-
-      <main className="flex min-w-0 flex-1 flex-col bg-transparent">
-        <header className="sticky top-0 z-10 flex h-16 items-center justify-between border-b border-zinc-800/60 bg-zinc-950/80 px-4 backdrop-blur-md sm:px-6 lg:px-8">
-          <div className="flex items-center gap-4">
-            <button
-              className="text-zinc-400 transition-colors hover:text-zinc-100 md:hidden"
-              type="button"
-              onClick={() => setIsMenuOpen(true)}
-            >
-              <Icon icon="solar:hamburger-menu-linear" width={22} height={22} />
-            </button>
-            <h1 className="hidden text-lg font-medium tracking-tight text-zinc-100 sm:block">
-              Overview
-            </h1>
-            <div className="hidden items-center rounded-md border border-zinc-800 bg-zinc-900 p-0.5 sm:flex">
-              <button
-                className="rounded px-3 py-1 text-xs font-normal text-zinc-400 transition-colors hover:text-zinc-200"
-                type="button"
-              >
-                Testnet
-              </button>
-              <button
-                className="rounded border border-zinc-700/50 bg-zinc-800 px-3 py-1 text-xs font-normal text-zinc-100 shadow-sm"
-                type="button"
-              >
-                Live
+              <button className="relative p-1 text-zinc-400 transition-colors hover:text-zinc-100" type="button">
+                <Icon icon="solar:bell-linear" width={20} height={20} />
+                {alertCount > 0 ? (
+                  <span className="absolute right-1 top-1 h-1.5 w-1.5 rounded-full bg-rose-500" />
+                ) : null}
               </button>
             </div>
-          </div>
-
-          <div className="flex items-center gap-4">
-            <div className="hidden items-center gap-2 rounded-full border border-emerald-900/30 bg-emerald-900/10 px-3 py-1.5 text-xs font-normal text-emerald-500 sm:flex">
-              <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-emerald-500" />
-              Binance API Connected
-            </div>
-            <button className="relative p-1 text-zinc-400 transition-colors hover:text-zinc-100" type="button">
-              <Icon icon="solar:bell-linear" width={20} height={20} />
-              {alertCount > 0 ? (
-                <span className="absolute right-1 top-1 h-1.5 w-1.5 rounded-full bg-rose-500" />
-              ) : null}
-            </button>
-          </div>
-        </header>
-
-        <div className="flex-1 space-y-8 overflow-y-auto p-4 sm:p-6 lg:p-8">
+          </>
+        )}
+      >
           {actionError ? (
             <div className="rounded-xl border border-rose-500/20 bg-rose-500/10 px-4 py-3 text-sm text-rose-300">
               {actionError}
@@ -1062,8 +816,7 @@ function DashboardPage() {
               </div>
             </div>
           </div>
-        </div>
-      </main>
+      </ProtectedShell>
 
       {isCreateBotModalOpen ? (
         <div className="fixed inset-0 z-40 flex items-center justify-center bg-black/65 px-4 backdrop-blur-sm">
@@ -1367,6 +1120,6 @@ function DashboardPage() {
           </div>
         </div>
       ) : null}
-    </div>
+    </>
   )
 }

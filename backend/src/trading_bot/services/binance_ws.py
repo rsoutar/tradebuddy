@@ -5,11 +5,13 @@ import logging
 import threading
 import time
 from dataclasses import replace
+from pathlib import Path
 from typing import Any, Optional
 
 from websocket import WebSocketApp
 
 from trading_bot.models import MarketSnapshot
+from trading_bot.services.market_data import write_shared_snapshot
 
 
 logger = logging.getLogger(__name__)
@@ -28,6 +30,7 @@ class BinanceSpotWebSocketMarketData:
         websocket_url: str,
         initial_timeout_seconds: float = 2.0,
         reconnect_delay_seconds: float = 3.0,
+        snapshot_path: Optional[Path] = None,
     ) -> None:
         self._symbol = symbol
         self._stream_symbol = to_binance_symbol(symbol)
@@ -41,6 +44,7 @@ class BinanceSpotWebSocketMarketData:
         self._websocket: Optional[WebSocketApp] = None
         self._latest_snapshot: Optional[MarketSnapshot] = None
         self._last_error: Optional[str] = None
+        self._snapshot_path = snapshot_path
 
     def get_snapshot(self, symbol: str) -> Optional[MarketSnapshot]:
         if symbol != self._symbol:
@@ -131,6 +135,11 @@ class BinanceSpotWebSocketMarketData:
         with self._snapshot_lock:
             self._latest_snapshot = snapshot
         self._snapshot_ready.set()
+        if self._snapshot_path is not None:
+            try:
+                write_shared_snapshot(self._snapshot_path, snapshot)
+            except OSError as exc:  # pragma: no cover
+                logger.warning("Unable to persist shared market snapshot: %s", exc)
 
     def _snapshot_from_ticker_event(self, event: dict[str, Any]) -> MarketSnapshot:
         price = float(event["c"])

@@ -15,7 +15,7 @@ def build_client(monkeypatch, tmp_path) -> TestClient:
     monkeypatch.delenv("TRADING_BOT_API_CORS_ORIGINS", raising=False)
     monkeypatch.setenv("TRADING_BOT_MARKETDATA_WS_ENABLED", "false")
     monkeypatch.setenv("TRADING_BOT_STATE_DIR", str(tmp_path / "state"))
-    app = create_api(TradingBotApp(load_settings()))
+    app = create_api(TradingBotApp(load_settings(), worker_autostart=False))
     return TestClient(app)
 
 
@@ -98,8 +98,8 @@ def test_create_bot_persists_active_strategy_and_trades(monkeypatch, tmp_path) -
         json={
             "strategy": "grid",
             "grid_config": {
-                "lower_price": 84000,
-                "upper_price": 92000,
+                "lower_price": 62000,
+                "upper_price": 72000,
                 "grid_count": 6,
                 "spacing_pct": 1.8,
                 "stop_loss_enabled": True,
@@ -137,8 +137,8 @@ def test_trade_history_endpoint_returns_recorded_trades(monkeypatch, tmp_path) -
         json={
             "strategy": "grid",
             "grid_config": {
-                "lower_price": 84000,
-                "upper_price": 92000,
+                "lower_price": 62000,
+                "upper_price": 72000,
                 "grid_count": 6,
                 "spacing_pct": 1.8,
                 "stop_loss_enabled": False,
@@ -161,6 +161,66 @@ def test_trade_history_endpoint_returns_recorded_trades(monkeypatch, tmp_path) -
     assert payload["trades"][0]["botName"].startswith("Grid Bot #")
     assert payload["trades"][0]["strategy"] == "grid"
     assert payload["trades"][0]["status"] == "planned"
+
+
+def test_bot_history_tracks_multiple_active_bots(monkeypatch, tmp_path) -> None:
+    client = build_client(monkeypatch, tmp_path)
+
+    first_response = client.post(
+        "/api/bots",
+        json={
+            "strategy": "grid",
+            "grid_config": {
+                "lower_price": 62000,
+                "upper_price": 72000,
+                "grid_count": 6,
+                "spacing_pct": 1.8,
+                "stop_loss_enabled": False,
+            },
+            "user_id": "user-123",
+            "user_name": "Test Trader",
+        },
+    )
+
+    assert first_response.status_code == 200
+
+    second_response = client.post(
+        "/api/bots",
+        json={
+            "strategy": "grid",
+            "grid_config": {
+                "lower_price": 63000,
+                "upper_price": 73000,
+                "grid_count": 8,
+                "spacing_pct": 2.0,
+                "stop_loss_enabled": True,
+                "stop_loss_pct": 9.5,
+            },
+            "user_id": "user-123",
+            "user_name": "Test Trader",
+        },
+    )
+
+    assert second_response.status_code == 200
+    second_payload = second_response.json()
+    assert len(second_payload["dashboard"]["activeStrategies"]) == 2
+    assert second_payload["dashboard"]["activeStrategies"][0]["name"].endswith("#02")
+
+    history_response = client.get(
+        "/api/bots/history",
+        params={"user_id": "user-123", "user_name": "Test Trader"},
+    )
+
+    assert history_response.status_code == 200
+    history_payload = history_response.json()
+    assert history_payload["summary"]["totalBots"] == 2
+    assert history_payload["summary"]["activeBotCount"] == 2
+    assert history_payload["summary"]["previousBotCount"] == 0
+    assert history_payload["activeBots"][0]["name"].endswith("#02")
+    assert history_payload["activeBots"][0]["status"] == "paper-running"
+    assert history_payload["activeBots"][1]["name"].endswith("#01")
+    assert history_payload["activeBots"][1]["status"] == "paper-running"
+    assert history_payload["previousBots"] == []
 
 
 def test_deposit_endpoint_persists_balance_and_log(monkeypatch, tmp_path) -> None:

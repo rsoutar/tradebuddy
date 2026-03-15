@@ -10,6 +10,7 @@ import {
   useRouterState,
 } from '@tanstack/react-router'
 import { TanStackRouterDevtools } from '@tanstack/react-router-devtools'
+import { isProtectedPathname } from '../lib/protected-route'
 import { getViewer, logoutViewer } from '../lib/session'
 import appCss from '../styles/app.css?url'
 
@@ -47,7 +48,7 @@ function RootComponent() {
   const pathname = useRouterState({
     select: (state) => state.location.pathname,
   })
-  const isDashboardRoute = pathname === '/dashboard' || pathname === '/history'
+  const isProtectedRoute = isProtectedPathname(pathname)
 
   async function handleLogout() {
     try {
@@ -61,7 +62,7 @@ function RootComponent() {
 
   return (
     <RootDocument>
-      {isDashboardRoute ? (
+      {isProtectedRoute ? (
         <main className="dashboard-route-main">
           <Outlet />
         </main>
@@ -145,8 +146,7 @@ function RootDocument({ children }: Readonly<{ children: ReactNode }>) {
   const pathname = useRouterState({
     select: (state) => state.location.pathname,
   })
-  const bodyClassName =
-    pathname === '/dashboard' || pathname === '/history' ? 'dark-dashboard-body' : 'app-body'
+  const bodyClassName = isProtectedPathname(pathname) ? 'dark-dashboard-body' : 'app-body'
 
   return (
     <html lang="en">

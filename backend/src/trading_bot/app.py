@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import asdict
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any, Optional, Union
 
 from trading_bot.logging_config import configure_logging
@@ -15,9 +16,10 @@ from trading_bot.models import (
     StrategyType,
 )
 from trading_bot.paper_store import PaperTradingStore
+from trading_bot.runtime import BotProcessManager
 from trading_bot.services.exchange import CcxtExchangeClient, MockExchangeClient
 from trading_bot.services.binance_ws import BinanceSpotWebSocketMarketData
-from trading_bot.services.market_data import MarketDataService
+from trading_bot.services.market_data import MarketDataService, SharedSnapshotFileMarketData
 from trading_bot.services.risk import RiskManager
 from trading_bot.settings import AppSettings, load_settings
 from trading_bot.strategies.grid import GridStrategy
@@ -26,8 +28,15 @@ from trading_bot.strategies.rebalance import RebalanceStrategy
 
 
 class TradingBotApp:
-    def __init__(self, settings: AppSettings) -> None:
+    def __init__(
+        self,
+        settings: AppSettings,
+        *,
+        enable_market_stream: bool = True,
+        worker_autostart: bool = True,
+    ) -> None:
         self.settings = settings
+        self._enable_market_stream = enable_market_stream
         configure_logging(settings.runtime.log_level, settings.runtime.log_dir)
         settings.runtime.state_dir.mkdir(parents=True, exist_ok=True)
         self.exchange_client = self._create_exchange_client()
@@ -37,13 +46,23 @@ class TradingBotApp:
         )
         self.paper_store = PaperTradingStore(settings.runtime.state_dir / "paper_trading.sqlite3")
         self.risk_manager = RiskManager()
+        self.process_manager = BotProcessManager(
+            settings,
+            self.paper_store,
+            enabled=worker_autostart,
+        )
 
     def _create_exchange_client(self):
         if self.settings.exchange.api_key and self.settings.exchange.api_secret:
             return CcxtExchangeClient(self.settings.exchange)
         return MockExchangeClient()
 
+    def _shared_snapshot_path(self) -> Path:
+        return self.settings.runtime.state_dir / "market_snapshot.json"
+
     def _create_market_stream(self):
+        if not self._enable_market_stream:
+            return SharedSnapshotFileMarketData(self._shared_snapshot_path())
         if (
             self.settings.exchange.exchange_id == "binance"
             and self.settings.exchange.market_type == "spot"
@@ -53,8 +72,9 @@ class TradingBotApp:
                 symbol=self.settings.runtime.symbol,
                 websocket_url=self.settings.market_data.websocket_url,
                 initial_timeout_seconds=self.settings.market_data.websocket_timeout_seconds,
+                snapshot_path=self._shared_snapshot_path(),
             )
-        return None
+        return SharedSnapshotFileMarketData(self._shared_snapshot_path())
 
     def status(self) -> BotStatus:
         return BotStatus(
@@ -70,6 +90,10 @@ class TradingBotApp:
 
     def _timestamp(self) -> str:
         return self._utcnow().isoformat()
+
+    def _reconcile_user_bots(self, user_id: str) -> None:
+        for bot in self.paper_store.list_bot_instances(user_id=user_id):
+            self.process_manager.reconcile_bot(bot["id"])
 
     def _strategy_label(self, strategy_type: StrategyType) -> str:
         return {
@@ -364,6 +388,13 @@ class TradingBotApp:
             "unrealizedPnlPct": unrealized_pnl_pct,
         }
 
+    def _bot_instance_summary(
+        self,
+        bot_row: dict[str, Any],
+        snapshot: MarketSnapshot,
+    ) -> dict[str, Any]:
+        return self._active_strategy_summary(bot_row, snapshot)
+
     def _grid_config_from_payload(
         self, config_payload: Optional[dict[str, Any]]
     ) -> Optional[GridBotConfig]:
@@ -383,6 +414,7 @@ class TradingBotApp:
         )
 
     def dashboard(self, user_id: str = "demo-user", user_name: str = "Demo Trader") -> dict[str, Any]:
+        self._reconcile_user_bots(user_id)
         snapshot = self.market_data.get_snapshot(self.settings.runtime.symbol)
         account_state = self.paper_store.ensure_account(
             user_id=user_id,
@@ -535,6 +567,7 @@ class TradingBotApp:
         return self.dashboard(user_id=user_id, user_name=user_name)
 
     def trade_history(self, user_id: str = "demo-user", user_name: str = "Demo Trader") -> dict[str, Any]:
+        self._reconcile_user_bots(user_id)
         account_state = self.paper_store.ensure_account(
             user_id=user_id,
             user_name=user_name,
@@ -559,6 +592,31 @@ class TradingBotApp:
                 "paperRunCount": account_state["paper_run_count"],
             },
             "trades": trades,
+        }
+
+    def bot_activity(self, user_id: str = "demo-user", user_name: str = "Demo Trader") -> dict[str, Any]:
+        self._reconcile_user_bots(user_id)
+        self.paper_store.ensure_account(
+            user_id=user_id,
+            user_name=user_name,
+            timestamp=self._timestamp(),
+        )
+        snapshot = self.market_data.get_snapshot(self.settings.runtime.symbol)
+        bot_rows = self.paper_store.list_bot_instances(user_id=user_id)
+        bot_runs = [self._bot_instance_summary(bot_row, snapshot) for bot_row in bot_rows]
+        active_bots = [bot for bot in bot_runs if bot["status"] == "paper-running"]
+        previous_bots = [bot for bot in bot_runs if bot["status"] != "paper-running"]
+
+        return {
+            "generatedAt": self._timestamp(),
+            "summary": {
+                "totalBots": len(bot_runs),
+                "activeBotCount": len(active_bots),
+                "previousBotCount": len(previous_bots),
+                "lastStartedAt": bot_runs[0]["startedAt"] if bot_runs else None,
+            },
+            "activeBots": active_bots,
+            "previousBots": previous_bots,
         }
 
     def create_bot(
@@ -586,7 +644,7 @@ class TradingBotApp:
             balances,
             config_override=config_override,
         )
-        self.paper_store.record_bot_start(
+        created_bot = self.paper_store.record_bot_start(
             user_id=user_id,
             user_name=user_name,
             strategy=strategy_type.value,
@@ -598,8 +656,35 @@ class TradingBotApp:
             snapshot_price=snapshot.price,
             timestamp=timestamp,
         )
+        created_bot_id = created_bot.get("created_bot_id")
+        if isinstance(created_bot_id, str):
+            self.process_manager.start_bot(created_bot_id)
+        return self.dashboard(user_id=user_id, user_name=user_name)
+
+    def start_bot(self, bot_id: str, user_id: str = "demo-user", user_name: str = "Demo Trader") -> dict[str, Any]:
+        self.paper_store.ensure_account(user_id=user_id, user_name=user_name, timestamp=self._timestamp())
+        bot = self.paper_store.get_bot_instance(bot_id=bot_id)
+        if bot is None or bot["userId"] != user_id:
+            raise ValueError("Bot not found for this user.")
+        self.process_manager.start_bot(bot_id)
+        return self.dashboard(user_id=user_id, user_name=user_name)
+
+    def stop_bot(self, bot_id: str, user_id: str = "demo-user", user_name: str = "Demo Trader") -> dict[str, Any]:
+        self.paper_store.ensure_account(user_id=user_id, user_name=user_name, timestamp=self._timestamp())
+        bot = self.paper_store.get_bot_instance(bot_id=bot_id)
+        if bot is None or bot["userId"] != user_id:
+            raise ValueError("Bot not found for this user.")
+        self.process_manager.request_stop(bot_id)
         return self.dashboard(user_id=user_id, user_name=user_name)
 
 
-def create_app() -> TradingBotApp:
-    return TradingBotApp(load_settings())
+def create_app(
+    *,
+    enable_market_stream: bool = True,
+    worker_autostart: bool = True,
+) -> TradingBotApp:
+    return TradingBotApp(
+        load_settings(),
+        enable_market_stream=enable_market_stream,
+        worker_autostart=worker_autostart,
+    )

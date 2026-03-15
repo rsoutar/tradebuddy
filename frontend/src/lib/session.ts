@@ -47,6 +47,28 @@ export type ActiveStrategy = {
   lastTradeAt?: string
 }
 
+export type BotRun = {
+  id: string
+  name: string
+  strategy: StrategyKey
+  strategyLabel: string
+  symbol: string
+  exchange: string
+  status: 'paper-running' | 'stopped' | 'crashed'
+  tradeCount: number
+  buyCount: number
+  sellCount: number
+  totalNotionalUsd: number
+  unrealizedPnlUsd: number
+  unrealizedPnlPct: number
+  configSummary: string
+  createdAt: string
+  startedAt: string
+  updatedAt: string
+  lastTradeAt?: string
+  stoppedAt?: string
+}
+
 export type PaperTrade = {
   id: string
   botId: string
@@ -77,6 +99,17 @@ export type TradeHistoryState = {
     paperRunCount: number
   }
   trades: PaperTrade[]
+}
+
+export type BotActivityState = {
+  summary: {
+    totalBots: number
+    activeBotCount: number
+    previousBotCount: number
+    lastStartedAt?: string
+  }
+  activeBots: BotRun[]
+  previousBots: BotRun[]
 }
 
 export type BacktestSummary = {
@@ -219,6 +252,7 @@ type BackendDashboardEnvelope = {
 }
 
 type BackendTradeHistoryEnvelope = TradeHistoryState
+type BackendBotActivityEnvelope = BotActivityState
 
 function getBackendApiBaseUrl() {
   return process.env.VITE_API_BASE_URL ?? 'http://127.0.0.1:8000'
@@ -447,6 +481,20 @@ export const getTradeHistory = createServerFn({ method: 'GET' }).handler(async (
   url.searchParams.set('user_name', session.data.user.displayName)
 
   return fetchBackend<BackendTradeHistoryEnvelope>(url.toString())
+})
+
+export const getBotActivity = createServerFn({ method: 'GET' }).handler(async () => {
+  const session = await useSession<SessionData>(getSessionConfig())
+
+  if (!session.data.user) {
+    throw new Error('You need to sign in before opening active bots.')
+  }
+
+  const url = new URL('/api/bots/history', getBackendApiBaseUrl())
+  url.searchParams.set('user_id', session.data.user.userId)
+  url.searchParams.set('user_name', session.data.user.displayName)
+
+  return fetchBackend<BackendBotActivityEnvelope>(url.toString())
 })
 
 export const runPaperTrading = createServerFn({ method: 'POST' }).handler(

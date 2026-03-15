@@ -31,3 +31,21 @@
 2026-03-15 20:29:10,268 INFO [trading_bot.services.binance_ws] Connecting to Binance spot WebSocket: wss://data-stream.binance.vision/stream?streams=btcusdt@ticker
 2026-03-15 20:29:10,783 INFO [websocket] Websocket connected
 2026-03-15 20:29:10,784 INFO [trading_bot.services.binance_ws] Binance spot WebSocket connected for BTC/USDT
+2026-03-15 20:45:49,288 INFO [trading_bot.services.binance_ws] Connecting to Binance spot WebSocket: wss://data-stream.binance.vision/stream?streams=btcusdt@ticker
+2026-03-15 20:45:49,770 INFO [websocket] Websocket connected
+2026-03-15 20:45:49,772 INFO [trading_bot.services.binance_ws] Binance spot WebSocket connected for BTC/USDT
+2026-03-15 20:50:24,986 INFO [trading_bot.services.binance_ws] Connecting to Binance spot WebSocket: wss://data-stream.binance.vision/stream?streams=btcusdt@ticker
+2026-03-15 20:50:25,542 INFO [websocket] Websocket connected
+2026-03-15 20:50:25,542 INFO [trading_bot.services.binance_ws] Binance spot WebSocket connected for BTC/USDT
+2026-03-15 20:52:14,509 INFO [trading_bot.services.binance_ws] Connecting to Binance spot WebSocket: wss://data-stream.binance.vision/stream?streams=btcusdt@ticker
+2026-03-15 20:52:15,019 INFO [websocket] Websocket connected
+2026-03-15 20:52:15,020 INFO [trading_bot.services.binance_ws] Binance spot WebSocket connected for BTC/USDT
+2026-03-15 20:56:49,869 INFO [trading_bot.services.binance_ws] Connecting to Binance spot WebSocket: wss://data-stream.binance.vision/stream?streams=btcusdt@ticker
+2026-03-15 20:56:50,377 INFO [websocket] Websocket connected
+2026-03-15 20:56:50,377 INFO [trading_bot.services.binance_ws] Binance spot WebSocket connected for BTC/USDT
+2026-03-15 20:59:19,687 INFO [trading_bot.services.binance_ws] Connecting to Binance spot WebSocket: wss://data-stream.binance.vision/stream?streams=btcusdt@ticker
+2026-03-15 20:59:20,231 INFO [websocket] Websocket connected
+2026-03-15 20:59:20,232 INFO [trading_bot.services.binance_ws] Binance spot WebSocket connected for BTC/USDT
+2026-03-15 21:10:29,913 INFO [trading_bot.services.binance_ws] Connecting to Binance spot WebSocket: wss://data-stream.binance.vision/stream?streams=btcusdt@ticker
+2026-03-15 21:10:30,475 INFO [websocket] Websocket connected
+2026-03-15 21:10:30,476 INFO [trading_bot.services.binance_ws] Binance spot WebSocket connected for BTC/USDT

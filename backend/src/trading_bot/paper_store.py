@@ -65,6 +65,10 @@ class PaperTradingStore:
                     created_at TEXT NOT NULL,
                     started_at TEXT NOT NULL,
                     stopped_at TEXT,
+                    desired_status TEXT NOT NULL DEFAULT 'running',
+                    pid INTEGER,
+                    heartbeat_at TEXT,
+                    last_error TEXT,
                     updated_at TEXT NOT NULL,
                     last_trade_at TEXT,
                     FOREIGN KEY(user_id) REFERENCES paper_accounts(user_id) ON DELETE CASCADE
@@ -89,6 +93,25 @@ class PaperTradingStore:
                 );
                 """
             )
+            self._ensure_column(connection, "bot_instances", "desired_status", "TEXT NOT NULL DEFAULT 'running'")
+            self._ensure_column(connection, "bot_instances", "pid", "INTEGER")
+            self._ensure_column(connection, "bot_instances", "heartbeat_at", "TEXT")
+            self._ensure_column(connection, "bot_instances", "last_error", "TEXT")
+
+    def _ensure_column(
+        self,
+        connection: sqlite3.Connection,
+        table_name: str,
+        column_name: str,
+        declaration: str,
+    ) -> None:
+        columns = {
+            row["name"]
+            for row in connection.execute(f"PRAGMA table_info({table_name})").fetchall()
+        }
+        if column_name in columns:
+            return
+        connection.execute(f"ALTER TABLE {table_name} ADD COLUMN {column_name} {declaration}")
 
     def _insert_event(
         self,
@@ -214,6 +237,31 @@ class PaperTradingStore:
             "created_at": row["created_at"],
             "updated_at": row["updated_at"],
         }
+
+    def _refresh_account_bot_status(
+        self,
+        connection: sqlite3.Connection,
+        *,
+        user_id: str,
+        timestamp: str,
+    ) -> None:
+        running_count = connection.execute(
+            """
+            SELECT COUNT(*) AS count
+            FROM bot_instances
+            WHERE user_id = ? AND status = 'paper-running'
+            """,
+            (user_id,),
+        ).fetchone()["count"]
+        next_status = "paper-running" if int(running_count or 0) > 0 else "idle"
+        connection.execute(
+            """
+            UPDATE paper_accounts
+            SET bot_status = ?, updated_at = ?
+            WHERE user_id = ?
+            """,
+            (next_status, timestamp, user_id),
+        )
 
     def ensure_account(self, *, user_id: str, user_name: str, timestamp: str) -> dict[str, Any]:
         with self._connect() as connection:
@@ -382,6 +430,14 @@ class PaperTradingStore:
                 ),
             )
             bot_id = int(cursor.lastrowid)
+            connection.execute(
+                """
+                UPDATE bot_instances
+                SET desired_status = 'running'
+                WHERE id = ?
+                """,
+                (bot_id,),
+            )
 
             for order in orders:
                 execution_price = round(order.price or snapshot_price, 2)
@@ -452,7 +508,9 @@ class PaperTradingStore:
                 "SELECT * FROM paper_accounts WHERE user_id = ?",
                 (user_id,),
             ).fetchone()
-            return self._row_to_account_state(row)
+            payload = self._row_to_account_state(row)
+            payload["created_bot_id"] = f"bot-{bot_id}"
+            return payload
 
     def record_backtest(
         self,
@@ -534,6 +592,10 @@ class PaperTradingStore:
                     b.config_json,
                     b.created_at,
                     b.started_at,
+                    b.desired_status,
+                    b.pid,
+                    b.heartbeat_at,
+                    b.last_error,
                     b.updated_at,
                     b.last_trade_at,
                     COUNT(t.id) AS trade_count,
@@ -555,6 +617,10 @@ class PaperTradingStore:
                     b.config_json,
                     b.created_at,
                     b.started_at,
+                    b.desired_status,
+                    b.pid,
+                    b.heartbeat_at,
+                    b.last_error,
                     b.updated_at,
                     b.last_trade_at
                 ORDER BY b.started_at DESC, b.id DESC
@@ -574,6 +640,10 @@ class PaperTradingStore:
                 "config": json.loads(row["config_json"]) if row["config_json"] else {},
                 "createdAt": row["created_at"],
                 "startedAt": row["started_at"],
+                "desiredStatus": row["desired_status"],
+                "pid": row["pid"],
+                "heartbeatAt": row["heartbeat_at"],
+                "lastError": row["last_error"],
                 "updatedAt": row["updated_at"],
                 "lastTradeAt": row["last_trade_at"],
                 "tradeCount": int(row["trade_count"] or 0),
@@ -584,6 +654,292 @@ class PaperTradingStore:
             }
             for row in rows
         ]
+
+    def list_bot_instances(self, *, user_id: str, limit: int = 50) -> list[dict[str, Any]]:
+        with self._connect() as connection:
+            rows = connection.execute(
+                """
+                SELECT
+                    b.id,
+                    b.name,
+                    b.strategy,
+                    b.strategy_label,
+                    b.symbol,
+                    b.exchange,
+                    b.status,
+                    b.config_json,
+                    b.created_at,
+                    b.started_at,
+                    b.stopped_at,
+                    b.desired_status,
+                    b.pid,
+                    b.heartbeat_at,
+                    b.last_error,
+                    b.updated_at,
+                    b.last_trade_at,
+                    COUNT(t.id) AS trade_count,
+                    SUM(CASE WHEN t.side = 'buy' THEN 1 ELSE 0 END) AS buy_count,
+                    SUM(CASE WHEN t.side = 'sell' THEN 1 ELSE 0 END) AS sell_count,
+                    COALESCE(SUM(t.notional_usd), 0) AS total_notional_usd,
+                    AVG(t.price) AS average_price
+                FROM bot_instances b
+                LEFT JOIN paper_trades t ON t.bot_id = b.id
+                WHERE b.user_id = ?
+                GROUP BY
+                    b.id,
+                    b.name,
+                    b.strategy,
+                    b.strategy_label,
+                    b.symbol,
+                    b.exchange,
+                    b.status,
+                    b.config_json,
+                    b.created_at,
+                    b.started_at,
+                    b.stopped_at,
+                    b.desired_status,
+                    b.pid,
+                    b.heartbeat_at,
+                    b.last_error,
+                    b.updated_at,
+                    b.last_trade_at
+                ORDER BY b.started_at DESC, b.id DESC
+                LIMIT ?
+                """,
+                (user_id, limit),
+            ).fetchall()
+        return [
+            {
+                "id": f"bot-{row['id']}",
+                "name": row["name"],
+                "strategy": row["strategy"],
+                "strategyLabel": row["strategy_label"],
+                "symbol": row["symbol"],
+                "exchange": row["exchange"],
+                "status": row["status"],
+                "config": json.loads(row["config_json"]) if row["config_json"] else {},
+                "createdAt": row["created_at"],
+                "startedAt": row["started_at"],
+                "stoppedAt": row["stopped_at"],
+                "desiredStatus": row["desired_status"],
+                "pid": row["pid"],
+                "heartbeatAt": row["heartbeat_at"],
+                "lastError": row["last_error"],
+                "updatedAt": row["updated_at"],
+                "lastTradeAt": row["last_trade_at"],
+                "tradeCount": int(row["trade_count"] or 0),
+                "buyCount": int(row["buy_count"] or 0),
+                "sellCount": int(row["sell_count"] or 0),
+                "totalNotionalUsd": round(float(row["total_notional_usd"] or 0), 2),
+                "averagePrice": round(float(row["average_price"] or 0), 2),
+            }
+            for row in rows
+        ]
+
+    def get_bot_instance(self, *, bot_id: str) -> Optional[dict[str, Any]]:
+        numeric_id = int(bot_id.replace("bot-", "", 1))
+        with self._connect() as connection:
+            row = connection.execute(
+                """
+                SELECT
+                    b.id,
+                    b.user_id,
+                    a.user_name,
+                    b.name,
+                    b.strategy,
+                    b.strategy_label,
+                    b.symbol,
+                    b.exchange,
+                    b.status,
+                    b.desired_status,
+                    b.pid,
+                    b.heartbeat_at,
+                    b.last_error,
+                    b.config_json,
+                    b.created_at,
+                    b.started_at,
+                    b.stopped_at,
+                    b.updated_at,
+                    b.last_trade_at
+                FROM bot_instances b
+                INNER JOIN paper_accounts a ON a.user_id = b.user_id
+                WHERE b.id = ?
+                """,
+                (numeric_id,),
+            ).fetchone()
+        if row is None:
+            return None
+        return {
+            "id": f"bot-{row['id']}",
+            "userId": row["user_id"],
+            "userName": row["user_name"],
+            "name": row["name"],
+            "strategy": row["strategy"],
+            "strategyLabel": row["strategy_label"],
+            "symbol": row["symbol"],
+            "exchange": row["exchange"],
+            "status": row["status"],
+            "desiredStatus": row["desired_status"],
+            "pid": row["pid"],
+            "heartbeatAt": row["heartbeat_at"],
+            "lastError": row["last_error"],
+            "config": json.loads(row["config_json"]) if row["config_json"] else {},
+            "createdAt": row["created_at"],
+            "startedAt": row["started_at"],
+            "stoppedAt": row["stopped_at"],
+            "updatedAt": row["updated_at"],
+            "lastTradeAt": row["last_trade_at"],
+        }
+
+    def mark_bot_process_started(self, *, bot_id: str, pid: int, timestamp: str) -> None:
+        numeric_id = int(bot_id.replace("bot-", "", 1))
+        with self._connect() as connection:
+            connection.execute(
+                """
+                UPDATE bot_instances
+                SET status = 'paper-running',
+                    desired_status = 'running',
+                    pid = ?,
+                    heartbeat_at = ?,
+                    last_error = NULL,
+                    stopped_at = NULL,
+                    updated_at = ?
+                WHERE id = ?
+                """,
+                (pid, timestamp, timestamp, numeric_id),
+            )
+            row = connection.execute(
+                "SELECT user_id FROM bot_instances WHERE id = ?",
+                (numeric_id,),
+            ).fetchone()
+            if row is not None:
+                self._refresh_account_bot_status(
+                    connection,
+                    user_id=row["user_id"],
+                    timestamp=timestamp,
+                )
+
+    def record_bot_heartbeat(
+        self,
+        *,
+        bot_id: str,
+        pid: int,
+        timestamp: str,
+        last_trade_at: Optional[str] = None,
+    ) -> None:
+        numeric_id = int(bot_id.replace("bot-", "", 1))
+        with self._connect() as connection:
+            if last_trade_at is not None:
+                connection.execute(
+                    """
+                    UPDATE bot_instances
+                    SET pid = ?,
+                        heartbeat_at = ?,
+                        updated_at = ?,
+                        last_trade_at = ?
+                    WHERE id = ?
+                    """,
+                    (pid, timestamp, timestamp, last_trade_at, numeric_id),
+                )
+            else:
+                connection.execute(
+                    """
+                    UPDATE bot_instances
+                    SET pid = ?,
+                        heartbeat_at = ?,
+                        updated_at = ?
+                    WHERE id = ?
+                    """,
+                    (pid, timestamp, timestamp, numeric_id),
+                )
+
+    def request_bot_stop(self, *, bot_id: str, timestamp: str) -> None:
+        numeric_id = int(bot_id.replace("bot-", "", 1))
+        with self._connect() as connection:
+            connection.execute(
+                """
+                UPDATE bot_instances
+                SET desired_status = 'stopped',
+                    updated_at = ?
+                WHERE id = ?
+                """,
+                (timestamp, numeric_id),
+            )
+
+    def mark_bot_stopped(self, *, bot_id: str, timestamp: str) -> None:
+        numeric_id = int(bot_id.replace("bot-", "", 1))
+        with self._connect() as connection:
+            connection.execute(
+                """
+                UPDATE bot_instances
+                SET status = 'stopped',
+                    desired_status = 'stopped',
+                    pid = NULL,
+                    heartbeat_at = ?,
+                    stopped_at = ?,
+                    updated_at = ?
+                WHERE id = ?
+                """,
+                (timestamp, timestamp, timestamp, numeric_id),
+            )
+            row = connection.execute(
+                "SELECT name, user_id FROM bot_instances WHERE id = ?",
+                (numeric_id,),
+            ).fetchone()
+            if row is not None:
+                self._refresh_account_bot_status(
+                    connection,
+                    user_id=row["user_id"],
+                    timestamp=timestamp,
+                )
+                self._insert_event(
+                    connection,
+                    user_id=row["user_id"],
+                    event_type="bot_stopped",
+                    tone="neutral",
+                    title=f"{row['name']} stopped",
+                    detail="Bot worker exited cleanly after a stop request.",
+                    timestamp=timestamp,
+                )
+
+    def mark_bot_crashed(self, *, bot_id: str, error: str, timestamp: str) -> None:
+        numeric_id = int(bot_id.replace("bot-", "", 1))
+        with self._connect() as connection:
+            connection.execute(
+                """
+                UPDATE bot_instances
+                SET status = 'crashed',
+                    pid = NULL,
+                    heartbeat_at = ?,
+                    last_error = ?,
+                    updated_at = ?
+                WHERE id = ?
+                """,
+                (timestamp, error[:500], timestamp, numeric_id),
+            )
+            row = connection.execute(
+                """
+                SELECT name, user_id
+                FROM bot_instances
+                WHERE id = ?
+                """,
+                (numeric_id,),
+            ).fetchone()
+            if row is not None:
+                self._refresh_account_bot_status(
+                    connection,
+                    user_id=row["user_id"],
+                    timestamp=timestamp,
+                )
+                self._insert_event(
+                    connection,
+                    user_id=row["user_id"],
+                    event_type="bot_crashed",
+                    tone="warning",
+                    title=f"{row['name']} crashed",
+                    detail=error[:500],
+                    timestamp=timestamp,
+                )
 
     def list_paper_trades(self, *, user_id: str, limit: int = 250) -> list[dict[str, Any]]:
         with self._connect() as connection:

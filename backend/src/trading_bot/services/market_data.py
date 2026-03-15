@@ -1,5 +1,9 @@
 from __future__ import annotations
 
+import json
+import time
+from dataclasses import asdict
+from pathlib import Path
 from typing import Optional, Protocol
 
 from trading_bot.models import MarketSnapshot
@@ -9,6 +13,49 @@ from trading_bot.services.exchange import ExchangeClient
 class MarketDataStream(Protocol):
     def get_snapshot(self, symbol: str) -> Optional[MarketSnapshot]:
         ...
+
+
+class SharedSnapshotFileMarketData:
+    def __init__(self, snapshot_path: Path, max_age_seconds: float = 10.0) -> None:
+        self._snapshot_path = snapshot_path
+        self._max_age_seconds = max_age_seconds
+
+    def get_snapshot(self, symbol: str) -> Optional[MarketSnapshot]:
+        if not self._snapshot_path.exists():
+            return None
+
+        try:
+            payload = json.loads(self._snapshot_path.read_text())
+        except (OSError, json.JSONDecodeError):
+            return None
+
+        if payload.get("symbol") != symbol:
+            return None
+
+        written_at = float(payload.get("written_at", 0.0))
+        if written_at <= 0 or (time.time() - written_at) > self._max_age_seconds:
+            return None
+
+        snapshot = payload.get("snapshot")
+        if not isinstance(snapshot, dict):
+            return None
+
+        try:
+            return MarketSnapshot(**snapshot)
+        except TypeError:
+            return None
+
+
+def write_shared_snapshot(snapshot_path: Path, snapshot: MarketSnapshot) -> None:
+    snapshot_path.parent.mkdir(parents=True, exist_ok=True)
+    temp_path = snapshot_path.with_suffix(".tmp")
+    payload = {
+        "written_at": time.time(),
+        "symbol": snapshot.symbol,
+        "snapshot": asdict(snapshot),
+    }
+    temp_path.write_text(json.dumps(payload))
+    temp_path.replace(snapshot_path)
 
 
 class MarketDataService:
