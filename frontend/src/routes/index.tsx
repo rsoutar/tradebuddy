@@ -1,12 +1,6 @@
 import { Link, createFileRoute } from '@tanstack/react-router'
 import { Route as RootRoute } from './__root'
 
-const launchStats = [
-  { label: 'Paper capital', value: '$15,000', hint: 'Simulation-only bankroll' },
-  { label: 'Tracked bots', value: '3', hint: 'Grid, rebalance, infinity grid' },
-  { label: 'Latest backtest', value: '180 days', hint: 'Rolling BTC regime replay' },
-]
-
 const highlights = [
   {
     title: 'LINE sign-in first',
@@ -39,7 +33,7 @@ function HomePage() {
 
   return (
     <div className="page">
-      <section className="hero-grid">
+      <section className="hero-grid landing-hero">
         <div className="hero-copy">
           <p className="eyebrow">Access Layer</p>
           <h2>Run Oscar from one dashboard after a LINE Login handoff.</h2>
@@ -51,54 +45,14 @@ function HomePage() {
               yet. Add them to switch this button to the live LINE OAuth flow.
             </p>
           ) : null}
-          <div className="hero-actions">
-            {viewer.authenticated ? (
+          {viewer.authenticated ? (
+            <div className="hero-actions">
               <Link className="primary-link" to="/dashboard">
                 Open dashboard
               </Link>
-            ) : (
-              <Link
-                className="primary-button"
-                to="/auth/line/start"
-              >
-                Continue with LINE
-              </Link>
-            )}
-            <Link className="secondary-link" to="/onboarding">
-              Review setup steps
-            </Link>
-          </div>
+            </div>
+          ) : null}
         </div>
-
-        <aside className="hero-panel">
-          <div className="hero-panel-head">
-            <p className="eyebrow">Dashboard Preview</p>
-            <strong>Bot operations at a glance</strong>
-          </div>
-          <div className="stat-grid">
-            {launchStats.map((item) => (
-              <article className="stat-card" key={item.label}>
-                <span>{item.label}</span>
-                <strong>{item.value}</strong>
-                <small>{item.hint}</small>
-              </article>
-            ))}
-          </div>
-          <div className="preview-stack">
-            <div className="preview-row">
-              <span>Paper engine</span>
-              <strong>Ready to launch</strong>
-            </div>
-            <div className="preview-row">
-              <span>Backtest health</span>
-              <strong>ROI 18.6% / Max DD 7.4%</strong>
-            </div>
-            <div className="preview-row">
-              <span>Best bot</span>
-              <strong>Infinity Grid in trend regime</strong>
-            </div>
-          </div>
-        </aside>
       </section>
 
       <section className="content-grid">

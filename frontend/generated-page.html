@@ -1,0 +1,458 @@
+<html lang="en"><head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Crypto Trading Bot Dashboard</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://code.iconify.design/iconify-icon/1.0.7/iconify-icon.min.js"></script>
+</head>
+<body class="bg-zinc-950 text-zinc-300 font-sans antialiased selection:bg-zinc-800 selection:text-zinc-100 flex h-screen overflow-hidden" style="background-image: radial-gradient(circle at 50% 0%, #18181b 0%, #09090b 100%);">
+
+    <!-- Sidebar -->
+    <aside class="w-64 border-r border-zinc-800/60 bg-zinc-950/50 backdrop-blur-xl flex-col hidden md:flex z-20">
+        <!-- Logo -->
+        <div class="h-16 flex items-center px-6 border-b border-zinc-800/60">
+            <span class="text-zinc-100 text-lg font-medium tracking-tighter uppercase">Nexus</span>
+            <span class="ml-2 px-1.5 py-0.5 rounded bg-zinc-800 text-zinc-400 text-xs font-normal">v2.4</span>
+        </div>
+
+        <!-- Navigation -->
+        <nav class="flex-1 overflow-y-auto py-4 px-3 space-y-1 text-sm font-normal">
+            <p class="px-3 text-xs font-normal text-zinc-500 mb-2 mt-4 uppercase tracking-widest">Platform</p>
+            <a href="#" class="flex items-center gap-3 px-3 py-2 rounded-md bg-zinc-800/50 text-zinc-100 transition-colors">
+                <iconify-icon icon="solar:widget-5-linear" stroke-width="1.5" class="text-base"></iconify-icon>
+                Dashboard
+            </a>
+            <a href="#" class="flex items-center gap-3 px-3 py-2 rounded-md text-zinc-400 hover:text-zinc-100 hover:bg-zinc-800/30 transition-colors">
+                <iconify-icon icon="solar:cpu-linear" stroke-width="1.5" class="text-base"></iconify-icon>
+                Active Bots
+                <span class="ml-auto bg-zinc-800 text-zinc-300 py-0.5 px-2 rounded-full text-xs">4</span>
+            </a>
+            <a href="#" class="flex items-center gap-3 px-3 py-2 rounded-md text-zinc-400 hover:text-zinc-100 hover:bg-zinc-800/30 transition-colors">
+                <iconify-icon icon="solar:chart-square-linear" stroke-width="1.5" class="text-base"></iconify-icon>
+                Backtesting
+            </a>
+            <a href="#" class="flex items-center gap-3 px-3 py-2 rounded-md text-zinc-400 hover:text-zinc-100 hover:bg-zinc-800/30 transition-colors">
+                <iconify-icon icon="solar:history-linear" stroke-width="1.5" class="text-base"></iconify-icon>
+                Trade History
+            </a>
+
+            <p class="px-3 text-xs font-normal text-zinc-500 mb-2 mt-8 uppercase tracking-widest">Connections</p>
+            <a href="#" class="flex items-center gap-3 px-3 py-2 rounded-md text-zinc-400 hover:text-zinc-100 hover:bg-zinc-800/30 transition-colors">
+                <iconify-icon icon="solar:wallet-money-linear" stroke-width="1.5" class="text-base"></iconify-icon>
+                Exchanges
+            </a>
+            <a href="#" class="flex items-center gap-3 px-3 py-2 rounded-md text-zinc-400 hover:text-zinc-100 hover:bg-zinc-800/30 transition-colors">
+                <iconify-icon icon="solar:key-square-linear" stroke-width="1.5" class="text-base"></iconify-icon>
+                API Keys
+            </a>
+
+            <p class="px-3 text-xs font-normal text-zinc-500 mb-2 mt-8 uppercase tracking-widest">System</p>
+            <a href="#" class="flex items-center gap-3 px-3 py-2 rounded-md text-zinc-400 hover:text-zinc-100 hover:bg-zinc-800/30 transition-colors">
+                <iconify-icon icon="solar:document-text-linear" stroke-width="1.5" class="text-base"></iconify-icon>
+                System Logs
+            </a>
+            <a href="#" class="flex items-center gap-3 px-3 py-2 rounded-md text-zinc-400 hover:text-zinc-100 hover:bg-zinc-800/30 transition-colors">
+                <iconify-icon icon="solar:settings-linear" stroke-width="1.5" class="text-base"></iconify-icon>
+                Settings
+            </a>
+        </nav>
+
+        <!-- User Profile -->
+        <div class="p-4 border-t border-zinc-800/60">
+            <button class="flex items-center w-full gap-3 p-2 rounded-md hover:bg-zinc-800/30 transition-colors text-left">
+                <div class="h-8 w-8 rounded-full bg-zinc-800 flex items-center justify-center text-zinc-400 border border-zinc-700">
+                    <iconify-icon icon="solar:user-linear" stroke-width="1.5"></iconify-icon>
+                </div>
+                <div class="flex-1 overflow-hidden">
+                    <p class="text-sm font-normal text-zinc-200 truncate">Trader One</p>
+                    <p class="text-xs text-zinc-500 truncate">Pro Plan</p>
+                </div>
+                <iconify-icon icon="solar:alt-arrow-up-linear" stroke-width="1.5" class="text-zinc-500"></iconify-icon>
+            </button>
+        </div>
+    </aside>
+
+    <!-- Main Content -->
+    <main class="flex-1 flex flex-col min-w-0 bg-transparent">
+        
+        <!-- Header -->
+        <header class="h-16 flex items-center justify-between px-4 sm:px-6 lg:px-8 border-b border-zinc-800/60 bg-zinc-950/80 backdrop-blur-md sticky top-0 z-10">
+            <div class="flex items-center gap-4">
+                <button class="md:hidden text-zinc-400 hover:text-zinc-100">
+                    <iconify-icon icon="solar:hamburger-menu-linear" stroke-width="1.5" class="text-xl"></iconify-icon>
+                </button>
+                <h1 class="text-lg font-medium tracking-tight text-zinc-100 hidden sm:block">Overview</h1>
+                
+                <!-- Environment Toggle -->
+                <div class="hidden sm:flex items-center bg-zinc-900 rounded-md p-0.5 border border-zinc-800">
+                    <button class="px-3 py-1 text-xs font-normal rounded text-zinc-400 hover:text-zinc-200 transition-colors">Testnet</button>
+                    <button class="px-3 py-1 text-xs font-normal rounded bg-zinc-800 text-zinc-100 shadow-sm border border-zinc-700/50">Live</button>
+                </div>
+            </div>
+
+            <div class="flex items-center gap-4">
+                <div class="flex items-center gap-2 px-3 py-1.5 rounded-full border border-emerald-900/30 bg-emerald-900/10 text-emerald-500 text-xs font-normal">
+                    <span class="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"></span>
+                    Binance API Connected
+                </div>
+                <button class="text-zinc-400 hover:text-zinc-100 relative p-1">
+                    <iconify-icon icon="solar:bell-linear" stroke-width="1.5" class="text-xl"></iconify-icon>
+                    <span class="absolute top-1 right-1 w-1.5 h-1.5 bg-rose-500 rounded-full"></span>
+                </button>
+            </div>
+        </header>
+
+        <!-- Scrollable Content -->
+        <div class="flex-1 overflow-y-auto p-4 sm:p-6 lg:p-8 space-y-8">
+            
+            <!-- Metrics Grid -->
+            <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+                <!-- Card 1 -->
+                <div class="bg-zinc-900/40 border border-zinc-800/60 rounded-xl p-5 flex flex-col justify-between">
+                    <div class="flex items-start justify-between text-zinc-400 mb-4">
+                        <span class="text-sm font-normal">Total Balance</span>
+                        <iconify-icon icon="solar:wallet-linear" stroke-width="1.5" class="text-base"></iconify-icon>
+                    </div>
+                    <div>
+                        <div class="text-2xl font-medium tracking-tight text-zinc-100">$124,592.00</div>
+                        <div class="flex items-center gap-2 mt-2">
+                            <span class="flex items-center text-emerald-400 text-xs font-normal bg-emerald-400/10 px-1.5 py-0.5 rounded">
+                                <iconify-icon icon="solar:arrow-right-up-linear" class="mr-0.5"></iconify-icon>
+                                2.4%
+                            </span>
+                            <span class="text-xs text-zinc-500 font-normal">vs last 24h</span>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Card 2 -->
+                <div class="bg-zinc-900/40 border border-zinc-800/60 rounded-xl p-5 flex flex-col justify-between">
+                    <div class="flex items-start justify-between text-zinc-400 mb-4">
+                        <span class="text-sm font-normal">24h Profit</span>
+                        <iconify-icon icon="solar:graph-up-linear" stroke-width="1.5" class="text-base"></iconify-icon>
+                    </div>
+                    <div>
+                        <div class="text-2xl font-medium tracking-tight text-emerald-400">+$842.50</div>
+                        <div class="flex items-center gap-2 mt-2">
+                            <span class="text-xs text-zinc-500 font-normal">14 trades executed</span>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Card 3 -->
+                <div class="bg-zinc-900/40 border border-zinc-800/60 rounded-xl p-5 flex flex-col justify-between">
+                    <div class="flex items-start justify-between text-zinc-400 mb-4">
+                        <span class="text-sm font-normal">Active Bots</span>
+                        <iconify-icon icon="solar:cpu-linear" stroke-width="1.5" class="text-base"></iconify-icon>
+                    </div>
+                    <div>
+                        <div class="text-2xl font-medium tracking-tight text-zinc-100">4 <span class="text-lg text-zinc-600 font-normal">/ 10</span></div>
+                        <div class="flex items-center gap-2 mt-2">
+                            <div class="w-full bg-zinc-800 rounded-full h-1.5">
+                                <div class="bg-zinc-400 h-1.5 rounded-full" style="width: 40%"></div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Card 4 -->
+                <div class="bg-zinc-900/40 border border-zinc-800/60 rounded-xl p-5 flex flex-col justify-between">
+                    <div class="flex items-start justify-between text-zinc-400 mb-4">
+                        <span class="text-sm font-normal">Win Rate (30d)</span>
+                        <iconify-icon icon="solar:target-linear" stroke-width="1.5" class="text-base"></iconify-icon>
+                    </div>
+                    <div>
+                        <div class="text-2xl font-medium tracking-tight text-zinc-100">68.2%</div>
+                        <div class="flex items-center gap-2 mt-2">
+                            <span class="flex items-center text-rose-400 text-xs font-normal bg-rose-400/10 px-1.5 py-0.5 rounded">
+                                <iconify-icon icon="solar:arrow-right-down-linear" class="mr-0.5"></iconify-icon>
+                                1.2%
+                            </span>
+                            <span class="text-xs text-zinc-500 font-normal">vs previous 30d</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Chart Section -->
+            <div class="bg-zinc-900/30 border border-zinc-800/50 rounded-xl overflow-hidden">
+                <div class="p-5 border-b border-zinc-800/50 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                    <div>
+                        <h2 class="text-base font-medium text-zinc-100 tracking-tight">Portfolio Performance</h2>
+                        <p class="text-xs text-zinc-500 mt-1 font-normal">Combined PnL across all active strategies</p>
+                    </div>
+                    <!-- Custom Dropdown/Tabs -->
+                    <div class="flex items-center bg-zinc-900/80 rounded-lg p-0.5 border border-zinc-800 text-xs font-normal">
+                        <button class="px-3 py-1.5 rounded-md text-zinc-400 hover:text-zinc-200 transition-colors">1H</button>
+                        <button class="px-3 py-1.5 rounded-md text-zinc-400 hover:text-zinc-200 transition-colors">1D</button>
+                        <button class="px-3 py-1.5 rounded-md bg-zinc-800 text-zinc-100 shadow-sm border border-zinc-700/50">1W</button>
+                        <button class="px-3 py-1.5 rounded-md text-zinc-400 hover:text-zinc-200 transition-colors">1M</button>
+                        <button class="px-3 py-1.5 rounded-md text-zinc-400 hover:text-zinc-200 transition-colors">ALL</button>
+                    </div>
+                </div>
+                
+                <div class="p-5 h-64 flex flex-col relative">
+                    <!-- Y-Axis Labels -->
+                    <div class="absolute left-5 top-5 bottom-8 flex flex-col justify-between text-xs text-zinc-600 font-normal z-0">
+                        <span>+$2k</span>
+                        <span>+$1k</span>
+                        <span>0</span>
+                        <span>-$1k</span>
+                    </div>
+                    
+                    <!-- Horizontal Grid Lines -->
+                    <div class="absolute left-14 right-5 top-6 bottom-10 flex flex-col justify-between z-0 pointer-events-none">
+                        <div class="w-full border-t border-zinc-800/30 border-dashed"></div>
+                        <div class="w-full border-t border-zinc-800/30 border-dashed"></div>
+                        <div class="w-full border-t border-zinc-700/50"></div>
+                        <div class="w-full border-t border-zinc-800/30 border-dashed"></div>
+                    </div>
+
+                    <!-- Simulated Bar Chart -->
+                    <div class="flex-1 ml-12 mt-2 flex items-end justify-between gap-1 sm:gap-2 z-10 relative h-full pb-6">
+                        <!-- Bars -->
+                        <div class="w-full bg-emerald-500/20 hover:bg-emerald-500/40 border border-emerald-500/30 rounded-t-sm h-[30%] transition-colors relative group cursor-crosshair"></div>
+                        <div class="w-full bg-emerald-500/20 hover:bg-emerald-500/40 border border-emerald-500/30 rounded-t-sm h-[45%] transition-colors"></div>
+                        <div class="w-full bg-rose-500/20 hover:bg-rose-500/40 border border-rose-500/30 rounded-t-sm h-[15%] transition-colors self-start mt-auto translate-y-full" style="transform-origin: top; transform: scaleY(-1);"></div>
+                        <div class="w-full bg-emerald-500/20 hover:bg-emerald-500/40 border border-emerald-500/30 rounded-t-sm h-[20%] transition-colors"></div>
+                        <div class="w-full bg-emerald-500/20 hover:bg-emerald-500/40 border border-emerald-500/30 rounded-t-sm h-[60%] transition-colors"></div>
+                        <div class="w-full bg-emerald-500/20 hover:bg-emerald-500/40 border border-emerald-500/30 rounded-t-sm h-[55%] transition-colors"></div>
+                        <div class="w-full bg-rose-500/20 hover:bg-rose-500/40 border border-rose-500/30 rounded-t-sm h-[25%] transition-colors self-start mt-auto translate-y-full" style="transform-origin: top; transform: scaleY(-1);"></div>
+                        <div class="w-full bg-emerald-500/20 hover:bg-emerald-500/40 border border-emerald-500/30 rounded-t-sm h-[40%] transition-colors"></div>
+                        <div class="w-full bg-emerald-500/20 hover:bg-emerald-500/40 border border-emerald-500/30 rounded-t-sm h-[70%] transition-colors"></div>
+                        <div class="w-full bg-emerald-500/20 hover:bg-emerald-500/40 border border-emerald-500/30 rounded-t-sm h-[85%] transition-colors relative group">
+                            <!-- Tooltip simulation -->
+                            <div class="absolute -top-10 left-1/2 -translate-x-1/2 bg-zinc-800 text-zinc-100 text-xs px-2 py-1 rounded border border-zinc-700 opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap pointer-events-none">
+                                Nov 12: +$1,120
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <!-- X-Axis Labels -->
+                    <div class="ml-12 flex justify-between text-xs text-zinc-600 font-normal absolute bottom-0 left-0 right-5 pb-2">
+                        <span>Nov 3</span>
+                        <span>Nov 6</span>
+                        <span>Nov 9</span>
+                        <span>Nov 12</span>
+                    </div>
+                </div>
+            </div>
+
+            <div class="grid grid-cols-1 lg:grid-cols-3 gap-8">
+                <!-- Active Bots Table -->
+                <div class="lg:col-span-2 flex flex-col">
+                    <div class="flex items-center justify-between mb-4">
+                        <h2 class="text-base font-medium text-zinc-100 tracking-tight">Active Strategies</h2>
+                        <button class="flex items-center gap-1.5 text-xs font-normal bg-zinc-100 text-zinc-900 px-3 py-1.5 rounded-md hover:bg-zinc-200 transition-colors">
+                            <iconify-icon icon="solar:add-circle-linear" stroke-width="1.5"></iconify-icon>
+                            New Bot
+                        </button>
+                    </div>
+                    
+                    <div class="bg-zinc-900/30 border border-zinc-800/50 rounded-xl overflow-hidden flex-1">
+                        <div class="overflow-x-auto">
+                            <table class="w-full text-left text-sm whitespace-nowrap">
+                                <thead class="border-b border-zinc-800/50 bg-zinc-900/20 text-xs text-zinc-500 font-normal uppercase tracking-wider">
+                                    <tr>
+                                        <th class="px-5 py-3">Bot Name</th>
+                                        <th class="px-5 py-3">Pair / Exchange</th>
+                                        <th class="px-5 py-3">Strategy</th>
+                                        <th class="px-5 py-3 text-right">Unrealized PnL</th>
+                                        <th class="px-5 py-3 text-center">Status</th>
+                                        <th class="px-5 py-3"></th>
+                                    </tr>
+                                </thead>
+                                <tbody class="divide-y divide-zinc-800/30">
+                                    <!-- Row 1 -->
+                                    <tr class="hover:bg-zinc-800/20 transition-colors">
+                                        <td class="px-5 py-4">
+                                            <div class="flex items-center gap-3">
+                                                <div class="h-8 w-8 rounded bg-blue-500/10 border border-blue-500/20 flex items-center justify-center text-blue-400">
+                                                    <iconify-icon icon="solar:chart-line-linear" stroke-width="1.5"></iconify-icon>
+                                                </div>
+                                                <div>
+                                                    <div class="font-medium text-zinc-200">Trend Follower V1</div>
+                                                    <div class="text-xs text-zinc-500">Uptime: 14d 2h</div>
+                                                </div>
+                                            </div>
+                                        </td>
+                                        <td class="px-5 py-4">
+                                            <div class="font-normal text-zinc-300">BTC/USDT</div>
+                                            <div class="text-xs text-zinc-500">Binance</div>
+                                        </td>
+                                        <td class="px-5 py-4 text-zinc-400 font-normal text-xs">EMA Crossover</td>
+                                        <td class="px-5 py-4 text-right">
+                                            <div class="font-medium text-emerald-400">+$342.10</div>
+                                            <div class="text-xs text-emerald-500/70">+1.2%</div>
+                                        </td>
+                                        <td class="px-5 py-4 text-center">
+                                            <!-- Custom Toggle -->
+                                            <label class="relative inline-flex items-center cursor-pointer">
+                                                <input type="checkbox" value="" class="sr-only peer" checked="">
+                                                <div class="w-8 h-4 bg-zinc-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-zinc-950 after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-zinc-300 after:border-zinc-300 after:border after:rounded-full after:h-3 after:w-3 after:transition-all peer-checked:bg-zinc-200"></div>
+                                            </label>
+                                        </td>
+                                        <td class="px-5 py-4 text-right">
+                                            <button class="text-zinc-500 hover:text-zinc-300 p-1">
+                                                <iconify-icon icon="solar:menu-dots-linear" stroke-width="1.5"></iconify-icon>
+                                            </button>
+                                        </td>
+                                    </tr>
+                                    
+                                    <!-- Row 2 -->
+                                    <tr class="hover:bg-zinc-800/20 transition-colors">
+                                        <td class="px-5 py-4">
+                                            <div class="flex items-center gap-3">
+                                                <div class="h-8 w-8 rounded bg-purple-500/10 border border-purple-500/20 flex items-center justify-center text-purple-400">
+                                                    <iconify-icon icon="solar:maximize-square-linear" stroke-width="1.5"></iconify-icon>
+                                                </div>
+                                                <div>
+                                                    <div class="font-medium text-zinc-200">Grid Infinity</div>
+                                                    <div class="text-xs text-zinc-500">Uptime: 45d 10h</div>
+                                                </div>
+                                            </div>
+                                        </td>
+                                        <td class="px-5 py-4">
+                                            <div class="font-normal text-zinc-300">ETH/USDT</div>
+                                            <div class="text-xs text-zinc-500">Kraken</div>
+                                        </td>
+                                        <td class="px-5 py-4 text-zinc-400 font-normal text-xs">Grid Trading</td>
+                                        <td class="px-5 py-4 text-right">
+                                            <div class="font-medium text-emerald-400">+$89.05</div>
+                                            <div class="text-xs text-emerald-500/70">+0.4%</div>
+                                        </td>
+                                        <td class="px-5 py-4 text-center">
+                                            <label class="relative inline-flex items-center cursor-pointer">
+                                                <input type="checkbox" value="" class="sr-only peer" checked="">
+                                                <div class="w-8 h-4 bg-zinc-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-zinc-950 after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-zinc-300 after:border-zinc-300 after:border after:rounded-full after:h-3 after:w-3 after:transition-all peer-checked:bg-zinc-200"></div>
+                                            </label>
+                                        </td>
+                                        <td class="px-5 py-4 text-right">
+                                            <button class="text-zinc-500 hover:text-zinc-300 p-1">
+                                                <iconify-icon icon="solar:menu-dots-linear" stroke-width="1.5"></iconify-icon>
+                                            </button>
+                                        </td>
+                                    </tr>
+
+                                    <!-- Row 3 -->
+                                    <tr class="hover:bg-zinc-800/20 transition-colors opacity-60">
+                                        <td class="px-5 py-4">
+                                            <div class="flex items-center gap-3">
+                                                <div class="h-8 w-8 rounded bg-zinc-800 border border-zinc-700 flex items-center justify-center text-zinc-500">
+                                                    <iconify-icon icon="solar:bolt-linear" stroke-width="1.5"></iconify-icon>
+                                                </div>
+                                                <div>
+                                                    <div class="font-medium text-zinc-400">Sniper SOL</div>
+                                                    <div class="text-xs text-zinc-500">Stopped</div>
+                                                </div>
+                                            </div>
+                                        </td>
+                                        <td class="px-5 py-4">
+                                            <div class="font-normal text-zinc-500">SOL/USDT</div>
+                                            <div class="text-xs text-zinc-600">Binance</div>
+                                        </td>
+                                        <td class="px-5 py-4 text-zinc-500 font-normal text-xs">Breakout</td>
+                                        <td class="px-5 py-4 text-right">
+                                            <div class="font-medium text-zinc-500">$0.00</div>
+                                            <div class="text-xs text-zinc-600">0.0%</div>
+                                        </td>
+                                        <td class="px-5 py-4 text-center">
+                                            <label class="relative inline-flex items-center cursor-pointer">
+                                                <input type="checkbox" value="" class="sr-only peer">
+                                                <div class="w-8 h-4 bg-zinc-800 border border-zinc-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-zinc-950 after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-zinc-500 after:border-zinc-500 after:border after:rounded-full after:h-3 after:w-3 after:transition-all peer-checked:bg-zinc-200"></div>
+                                            </label>
+                                        </td>
+                                        <td class="px-5 py-4 text-right">
+                                            <button class="text-zinc-500 hover:text-zinc-300 p-1">
+                                                <iconify-icon icon="solar:menu-dots-linear" stroke-width="1.5"></iconify-icon>
+                                            </button>
+                                        </td>
+                                    </tr>
+                                </tbody>
+                            </table>
+                        </div>
+                        <div class="px-5 py-3 border-t border-zinc-800/50 bg-zinc-900/10 flex items-center justify-center">
+                            <button class="text-xs text-zinc-400 hover:text-zinc-200 font-normal transition-colors">View All Strategies</button>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Recent Activity / Logs -->
+                <div class="flex flex-col">
+                    <h2 class="text-base font-medium text-zinc-100 tracking-tight mb-4">System Event Log</h2>
+                    <div class="bg-zinc-900/30 border border-zinc-800/50 rounded-xl p-5 flex-1 flex flex-col h-[380px]">
+                        <div class="flex-1 overflow-y-auto pr-2 space-y-4 text-sm font-normal relative">
+                            <!-- Gradient fade at top/bottom for scroll cue -->
+                            <div class="absolute inset-x-0 top-0 h-4 bg-gradient-to-b from-zinc-900/30 to-transparent pointer-events-none"></div>
+                            
+                            <!-- Log Item 1 -->
+                            <div class="flex gap-3 items-start group">
+                                <div class="mt-0.5 text-emerald-400">
+                                    <iconify-icon icon="solar:check-circle-linear" stroke-width="1.5"></iconify-icon>
+                                </div>
+                                <div>
+                                    <p class="text-zinc-300 leading-relaxed"><span class="text-zinc-100 font-medium">Trend Follower V1</span> executed <span class="text-emerald-400">BUY</span> order for 0.045 BTC at $34,210.50.</p>
+                                    <p class="text-xs text-zinc-500 mt-0.5">2 mins ago</p>
+                                </div>
+                            </div>
+
+                            <!-- Log Item 2 -->
+                            <div class="flex gap-3 items-start group">
+                                <div class="mt-0.5 text-blue-400">
+                                    <iconify-icon icon="solar:info-circle-linear" stroke-width="1.5"></iconify-icon>
+                                </div>
+                                <div>
+                                    <p class="text-zinc-300 leading-relaxed"><span class="text-zinc-100 font-medium">Grid Infinity</span> placed limit sell at $1,850.00.</p>
+                                    <p class="text-xs text-zinc-500 mt-0.5">15 mins ago</p>
+                                </div>
+                            </div>
+
+                            <!-- Log Item 3 -->
+                            <div class="flex gap-3 items-start group">
+                                <div class="mt-0.5 text-zinc-500">
+                                    <iconify-icon icon="solar:refresh-linear" stroke-width="1.5"></iconify-icon>
+                                </div>
+                                <div>
+                                    <p class="text-zinc-400 leading-relaxed">System synced with Binance API successfully. Latency: 45ms.</p>
+                                    <p class="text-xs text-zinc-500 mt-0.5">1 hour ago</p>
+                                </div>
+                            </div>
+
+                            <!-- Log Item 4 -->
+                            <div class="flex gap-3 items-start group">
+                                <div class="mt-0.5 text-rose-400">
+                                    <iconify-icon icon="solar:danger-triangle-linear" stroke-width="1.5"></iconify-icon>
+                                </div>
+                                <div>
+                                    <p class="text-zinc-300 leading-relaxed"><span class="text-zinc-100 font-medium">Sniper SOL</span> stopped manually by user.</p>
+                                    <p class="text-xs text-zinc-500 mt-0.5">3 hours ago</p>
+                                </div>
+                            </div>
+                            
+                            <!-- Log Item 5 -->
+                            <div class="flex gap-3 items-start group">
+                                <div class="mt-0.5 text-emerald-400">
+                                    <iconify-icon icon="solar:check-circle-linear" stroke-width="1.5"></iconify-icon>
+                                </div>
+                                <div>
+                                    <p class="text-zinc-300 leading-relaxed"><span class="text-zinc-100 font-medium">Trend Follower V1</span> executed <span class="text-rose-400">SELL</span> order for 0.045 BTC at $34,500.00. <br><span class="text-xs text-emerald-400">Profit: +$13.02</span></p>
+                                    <p class="text-xs text-zinc-500 mt-0.5">5 hours ago</p>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="mt-4 pt-4 border-t border-zinc-800/50">
+                            <!-- Minimal Input Field -->
+                            <div class="relative">
+                                <iconify-icon icon="solar:magnifer-linear" class="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-500" stroke-width="1.5"></iconify-icon>
+                                <input type="text" placeholder="Search logs..." class="w-full bg-zinc-900/50 border border-zinc-800 rounded-md py-1.5 pl-9 pr-3 text-xs text-zinc-200 placeholder-zinc-600 focus:outline-none focus:border-zinc-600 focus:ring-1 focus:ring-zinc-600 transition-shadow">
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+        </div>
+    </main>
+
+
+</body></html>
