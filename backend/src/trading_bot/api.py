@@ -1,8 +1,9 @@
 from __future__ import annotations
 
 from dataclasses import asdict
+from typing import Optional
 
-from fastapi import FastAPI, Query
+from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import RedirectResponse
 from pydantic import BaseModel, Field
@@ -20,11 +21,25 @@ class StrategyActionRequest(UserScopedRequest):
     strategy: StrategyType
 
 
+class GridConfigRequest(BaseModel):
+    lower_price: float = Field(gt=0)
+    upper_price: float = Field(gt=0)
+    grid_count: int = Field(ge=2)
+    spacing_pct: float = Field(gt=0)
+    stop_loss_enabled: bool = False
+    stop_loss_pct: Optional[float] = Field(default=None, gt=0)
+
+
+class CreateBotRequest(UserScopedRequest):
+    strategy: StrategyType
+    grid_config: Optional[GridConfigRequest] = None
+
+
 class DepositRequest(UserScopedRequest):
     amount_usd: float = Field(gt=0)
 
 
-def create_api(trading_app: TradingBotApp | None = None) -> FastAPI:
+def create_api(trading_app: Optional[TradingBotApp] = None) -> FastAPI:
     app_state = trading_app or create_app()
     api = FastAPI(
         title="Oscar Trading Bot API",
@@ -62,6 +77,13 @@ def create_api(trading_app: TradingBotApp | None = None) -> FastAPI:
     ) -> dict:
         return app_state.dashboard(user_id=user_id, user_name=user_name)
 
+    @api.get("/api/trades")
+    def get_trade_history(
+        user_id: str = Query(default="demo-user"),
+        user_name: str = Query(default="Demo Trader"),
+    ) -> dict:
+        return app_state.trade_history(user_id=user_id, user_name=user_name)
+
     @api.get("/api/strategies/{strategy}")
     def get_strategy_preview(strategy: StrategyType) -> dict:
         return app_state.demo_strategy(strategy)
@@ -73,6 +95,18 @@ def create_api(trading_app: TradingBotApp | None = None) -> FastAPI:
             user_id=payload.user_id,
             user_name=payload.user_name,
         )
+
+    @api.post("/api/bots")
+    def create_bot(payload: CreateBotRequest) -> dict:
+        try:
+            return app_state.create_bot(
+                payload.strategy,
+                user_id=payload.user_id,
+                user_name=payload.user_name,
+                grid_config=payload.grid_config.model_dump() if payload.grid_config else None,
+            )
+        except ValueError as error:
+            raise HTTPException(status_code=400, detail=str(error)) from error
 
     @api.post("/api/backtests/run")
     def run_backtest(payload: StrategyActionRequest) -> dict:

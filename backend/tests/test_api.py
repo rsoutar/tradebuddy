@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import sqlite3
+
 from fastapi.testclient import TestClient
 
 from trading_bot.api import create_api
@@ -33,6 +35,7 @@ def test_dashboard_endpoint_returns_dashboard_payload(monkeypatch, tmp_path) -> 
     assert payload["dashboard"]["botStatus"] == "idle"
     assert payload["dashboard"]["capitalUsd"] == 100.0
     assert len(payload["dashboard"]["bots"]) == 3
+    assert payload["dashboard"]["activeStrategies"] == []
     assert {bot["key"] for bot in payload["dashboard"]["bots"]} == {
         "grid",
         "rebalance",
@@ -85,6 +88,79 @@ def test_backtest_endpoint_returns_latest_summary(monkeypatch, tmp_path) -> None
     assert summary["strategy"] == "infinity-grid"
     assert summary["periodLabel"] == "Last 90 days"
     assert summary["trades"] >= 8
+
+
+def test_create_bot_persists_active_strategy_and_trades(monkeypatch, tmp_path) -> None:
+    client = build_client(monkeypatch, tmp_path)
+
+    response = client.post(
+        "/api/bots",
+        json={
+            "strategy": "grid",
+            "grid_config": {
+                "lower_price": 84000,
+                "upper_price": 92000,
+                "grid_count": 6,
+                "spacing_pct": 1.8,
+                "stop_loss_enabled": True,
+                "stop_loss_pct": 9.5,
+            },
+            "user_id": "user-123",
+            "user_name": "Test Trader",
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["dashboard"]["botStatus"] == "paper-running"
+    assert len(payload["dashboard"]["activeStrategies"]) == 1
+
+    active_bot = payload["dashboard"]["activeStrategies"][0]
+    assert active_bot["strategy"] == "grid"
+    assert active_bot["tradeCount"] > 0
+    assert "stop loss 9.5%" in active_bot["configSummary"]
+
+    database_path = tmp_path / "state" / "paper_trading.sqlite3"
+    with sqlite3.connect(database_path) as connection:
+        bot_count = connection.execute("SELECT COUNT(*) FROM bot_instances").fetchone()[0]
+        trade_count = connection.execute("SELECT COUNT(*) FROM paper_trades").fetchone()[0]
+
+    assert bot_count == 1
+    assert trade_count == active_bot["tradeCount"]
+
+
+def test_trade_history_endpoint_returns_recorded_trades(monkeypatch, tmp_path) -> None:
+    client = build_client(monkeypatch, tmp_path)
+
+    client.post(
+        "/api/bots",
+        json={
+            "strategy": "grid",
+            "grid_config": {
+                "lower_price": 84000,
+                "upper_price": 92000,
+                "grid_count": 6,
+                "spacing_pct": 1.8,
+                "stop_loss_enabled": False,
+            },
+            "user_id": "user-123",
+            "user_name": "Test Trader",
+        },
+    )
+
+    response = client.get(
+        "/api/trades",
+        params={"user_id": "user-123", "user_name": "Test Trader"},
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["summary"]["totalTrades"] > 0
+    assert payload["summary"]["plannedTrades"] == payload["summary"]["totalTrades"]
+    assert payload["summary"]["activeBotCount"] == 1
+    assert payload["trades"][0]["botName"].startswith("Grid Bot #")
+    assert payload["trades"][0]["strategy"] == "grid"
+    assert payload["trades"][0]["status"] == "planned"
 
 
 def test_deposit_endpoint_persists_balance_and_log(monkeypatch, tmp_path) -> None:

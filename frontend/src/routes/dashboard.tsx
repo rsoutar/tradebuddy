@@ -4,19 +4,18 @@ import { Link, createFileRoute, redirect } from '@tanstack/react-router'
 import { Icon } from '@iconify/react'
 import type { DashboardState, StrategyKey } from '../lib/session'
 import {
+  createBot,
   depositPaperFunds,
   getDashboard,
   getViewer,
   logoutViewer,
-  runBacktest,
-  runPaperTrading,
 } from '../lib/session'
 
 const navigationItems = [
   { id: 'dashboard', label: 'Dashboard', icon: 'solar:widget-5-linear', to: '/dashboard' },
-  { id: 'bots', label: 'Active Bots', icon: 'solar:cpu-linear', to: '/bots', badge: '4' },
+  { id: 'bots', label: 'Active Bots', icon: 'solar:cpu-linear', to: '/bots' },
   { id: 'backtest', label: 'Backtesting', icon: 'solar:chart-square-linear' },
-  { id: 'history', label: 'Trade History', icon: 'solar:history-linear' },
+  { id: 'history', label: 'Trade History', icon: 'solar:history-linear', to: '/history' },
 ]
 
 const connectionItems = [
@@ -32,61 +31,45 @@ const systemItems = [
 const strategyLabels: Record<StrategyKey, string> = {
   grid: 'Grid Bot',
   rebalance: 'Rebalance Bot',
-  'infinity-grid': 'Infinity Grid',
+  'infinity-grid': 'Infinity Grid Bot',
 }
 
-const strategyPresentation: Record<
-  StrategyKey,
+const botCatalog: Array<{
+  key: StrategyKey
+  eyebrow: string
+  description: string
+  icon: string
+  accent: string
+  availableNow: boolean
+}> = [
   {
-    id: string
-    name: string
-    pair: string
-    exchange: string
-    strategy: string
-    uptime: string
-    icon: string
-    tone: 'blue' | 'purple' | 'zinc'
-    pnl: number
-    pnlPercent: number
-  }
-> = {
-  grid: {
-    id: 'trend-v1',
-    name: 'Trend Follower V1',
-    pair: 'BTC/USDT',
-    exchange: 'Binance',
-    strategy: 'EMA Crossover',
-    uptime: '14d 2h',
-    icon: 'solar:chart-line-linear',
-    tone: 'blue',
-    pnl: 342.1,
-    pnlPercent: 1.2,
+    key: 'grid',
+    eyebrow: 'Ready now',
+    description: 'Define a price range, split it into levels, and let the ladder trade the chop.',
+    icon: 'solar:widget-4-linear',
+    accent:
+      'border-emerald-400/30 bg-[radial-gradient(circle_at_top,_rgba(16,185,129,0.16),_transparent_70%)]',
+    availableNow: true,
   },
-  'infinity-grid': {
-    id: 'grid-infinity',
-    name: 'Grid Infinity',
-    pair: 'ETH/USDT',
-    exchange: 'Kraken',
-    strategy: 'Grid Trading',
-    uptime: '45d 10h',
+  {
+    key: 'rebalance',
+    eyebrow: 'Coming soon',
+    description: 'Keep BTC allocation on target with scheduled drift checks and auto-adjustments.',
+    icon: 'solar:refresh-circle-linear',
+    accent:
+      'border-amber-400/20 bg-[radial-gradient(circle_at_top,_rgba(245,158,11,0.12),_transparent_70%)]',
+    availableNow: false,
+  },
+  {
+    key: 'infinity-grid',
+    eyebrow: 'Coming soon',
+    description: 'Push the grid upward in trend mode and keep extending entries as the market climbs.',
     icon: 'solar:maximize-square-linear',
-    tone: 'purple',
-    pnl: 89.05,
-    pnlPercent: 0.4,
+    accent:
+      'border-sky-400/20 bg-[radial-gradient(circle_at_top,_rgba(56,189,248,0.12),_transparent_70%)]',
+    availableNow: false,
   },
-  rebalance: {
-    id: 'sniper-sol',
-    name: 'Sniper SOL',
-    pair: 'SOL/USDT',
-    exchange: 'Binance',
-    strategy: 'Breakout',
-    uptime: 'Stopped',
-    icon: 'solar:bolt-linear',
-    tone: 'zinc',
-    pnl: 0,
-    pnlPercent: 0,
-  },
-}
+]
 
 const currencyFormatter = new Intl.NumberFormat('en-US', {
   style: 'currency',
@@ -118,6 +101,9 @@ export const Route = createFileRoute('/dashboard')({
       throw redirect({ to: '/' })
     }
   },
+  staleTime: 60_000,
+  preloadStaleTime: 60_000,
+  shouldReload: false,
   loader: () => getDashboard(),
   component: DashboardPage,
 })
@@ -175,6 +161,27 @@ function toneClasses(tone: 'blue' | 'purple' | 'zinc') {
   return {
     box: 'border-zinc-700 bg-zinc-900 text-zinc-500',
     icon: 'text-zinc-500',
+  }
+}
+
+function strategyTone(strategy: StrategyKey) {
+  if (strategy === 'grid') {
+    return {
+      tone: 'blue' as const,
+      icon: 'solar:widget-4-linear',
+    }
+  }
+
+  if (strategy === 'infinity-grid') {
+    return {
+      tone: 'purple' as const,
+      icon: 'solar:maximize-square-linear',
+    }
+  }
+
+  return {
+    tone: 'zinc' as const,
+    icon: 'solar:refresh-circle-linear',
   }
 }
 
@@ -282,16 +289,21 @@ function MetricCard({
 function DashboardPage() {
   const loaderData = Route.useLoaderData()
   const [dashboard, setDashboard] = useState<DashboardState>(loaderData.dashboard)
-  const [selectedStrategy, setSelectedStrategy] = useState<StrategyKey>(
-    loaderData.dashboard.activeStrategy,
-  )
   const [isMenuOpen, setIsMenuOpen] = useState(false)
-  const [isRunningBot, setIsRunningBot] = useState(false)
-  const [isBacktesting, setIsBacktesting] = useState(false)
   const [isRefreshing, setIsRefreshing] = useState(false)
   const [isLoggingOut, setIsLoggingOut] = useState(false)
   const [isProfileMenuOpen, setIsProfileMenuOpen] = useState(false)
   const [isDepositModalOpen, setIsDepositModalOpen] = useState(false)
+  const [isCreateBotModalOpen, setIsCreateBotModalOpen] = useState(false)
+  const [selectedBotType, setSelectedBotType] = useState<StrategyKey>('grid')
+  const [isCreatingBot, setIsCreatingBot] = useState(false)
+  const [createBotError, setCreateBotError] = useState<string>()
+  const [gridLowerPrice, setGridLowerPrice] = useState('')
+  const [gridUpperPrice, setGridUpperPrice] = useState('')
+  const [gridCount, setGridCount] = useState('8')
+  const [gridSpacing, setGridSpacing] = useState('2')
+  const [isGridStopLossEnabled, setIsGridStopLossEnabled] = useState(false)
+  const [gridStopLoss, setGridStopLoss] = useState('10')
   const [depositAmount, setDepositAmount] = useState('')
   const [depositError, setDepositError] = useState<string>()
   const [isDepositing, setIsDepositing] = useState(false)
@@ -300,18 +312,27 @@ function DashboardPage() {
   const viewerSubtitle =
     loaderData.viewer.statusMessage || `@${loaderData.viewer.userId.slice(0, 10)}`
 
-  const selectedBot = dashboard.bots.find((bot) => bot.key === selectedStrategy) ?? dashboard.bots[0]
-  const activeBots = dashboard.bots.filter((bot) => bot.status === 'paper-running').length
+  const activeBots = dashboard.activeStrategies.length
   const alertCount = dashboard.events.filter((event) => event.tone !== 'neutral').length
+  const totalUnrealizedPnl = dashboard.activeStrategies.reduce(
+    (sum, strategy) => sum + strategy.unrealizedPnlUsd,
+    0,
+  )
+  const totalTradeCount = dashboard.activeStrategies.reduce(
+    (sum, strategy) => sum + strategy.tradeCount,
+    0,
+  )
+  const averageWinRate =
+    dashboard.bots.reduce((sum, bot) => sum + bot.winRatePct, 0) / Math.max(dashboard.bots.length, 1)
 
   const metricsData = {
     totalBalance: dashboard.capitalUsd,
     balanceChange: 2.4,
-    profit24h: 842.5,
-    trades24h: 14,
+    profit24h: totalUnrealizedPnl,
+    trades24h: totalTradeCount,
     activeBots,
-    totalBots: dashboard.bots.length,
-    winRate: 68.2,
+    totalBots: Object.keys(strategyLabels).length,
+    winRate: averageWinRate,
     winRateChange: -1.2,
   }
 
@@ -327,15 +348,6 @@ function DashboardPage() {
     { date: 'Nov 11', value: 70, positive: true },
     { date: 'Nov 12', value: 85, positive: true },
   ]
-
-  const botStrategies = dashboard.bots.map((bot) => {
-    const presentation = strategyPresentation[bot.key]
-    return {
-      ...presentation,
-      key: bot.key,
-      status: bot.status === 'idle' ? 'stopped' : 'running',
-    }
-  })
 
   const activityLog = useMemo(
     () =>
@@ -368,38 +380,6 @@ function DashboardPage() {
       `${log.title} ${log.detail} ${log.time}`.toLowerCase().includes(needle),
     )
   }, [activityLog, searchValue])
-
-  async function handlePaperRun() {
-    try {
-      setActionError(undefined)
-      setIsRunningBot(true)
-      const nextDashboard = await runPaperTrading({
-        // @ts-ignore
-        data: { strategy: selectedStrategy },
-      })
-      setDashboard(nextDashboard)
-    } catch (error) {
-      setActionError(error instanceof Error ? error.message : 'Unable to start paper trading.')
-    } finally {
-      setIsRunningBot(false)
-    }
-  }
-
-  async function handleBacktest() {
-    try {
-      setActionError(undefined)
-      setIsBacktesting(true)
-      const nextDashboard = await runBacktest({
-        // @ts-ignore
-        data: { strategy: selectedStrategy },
-      })
-      setDashboard(nextDashboard)
-    } catch (error) {
-      setActionError(error instanceof Error ? error.message : 'Unable to run the backtest.')
-    } finally {
-      setIsBacktesting(false)
-    }
-  }
 
   async function handleLogout() {
     try {
@@ -448,6 +428,81 @@ function DashboardPage() {
       setDepositError(error instanceof Error ? error.message : 'Unable to deposit funds right now.')
     } finally {
       setIsDepositing(false)
+    }
+  }
+
+  async function handleCreateBotSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+
+    if (selectedBotType !== 'grid') {
+      setCreateBotError('Grid Bot is the first live flow. Rebalance and Infinity Grid are next.')
+      return
+    }
+
+    const lowerPrice = Number.parseFloat(gridLowerPrice)
+    const upperPrice = Number.parseFloat(gridUpperPrice)
+    const gridLevelCount = Number.parseInt(gridCount, 10)
+    const spacingPct = Number.parseFloat(gridSpacing)
+    const stopLossPct = isGridStopLossEnabled ? Number.parseFloat(gridStopLoss) : undefined
+
+    if (!Number.isFinite(lowerPrice) || !Number.isFinite(upperPrice)) {
+      setCreateBotError('Enter both lower and upper prices for the grid range.')
+      return
+    }
+
+    if (upperPrice <= lowerPrice) {
+      setCreateBotError('Upper price must be greater than the lower price.')
+      return
+    }
+
+    if (!Number.isInteger(gridLevelCount) || gridLevelCount < 2) {
+      setCreateBotError('Grid levels must be a whole number greater than or equal to 2.')
+      return
+    }
+
+    if (!Number.isFinite(spacingPct) || spacingPct <= 0) {
+      setCreateBotError('Grid spacing must be greater than 0.')
+      return
+    }
+
+    if (
+      isGridStopLossEnabled
+      && (!Number.isFinite(stopLossPct) || (stopLossPct ?? 0) <= 0)
+    ) {
+      setCreateBotError('Stop-loss percentage must be greater than 0.')
+      return
+    }
+
+    try {
+      setActionError(undefined)
+      setCreateBotError(undefined)
+      setIsCreatingBot(true)
+      const nextDashboard = await createBot({
+        // @ts-ignore
+        data: {
+          strategy: 'grid',
+          gridConfig: {
+            lowerPrice,
+            upperPrice,
+            gridCount: gridLevelCount,
+            spacingPct,
+            stopLossEnabled: isGridStopLossEnabled,
+            stopLossPct,
+          },
+        },
+      })
+      setDashboard(nextDashboard)
+      setIsCreateBotModalOpen(false)
+      setGridLowerPrice('')
+      setGridUpperPrice('')
+      setGridCount('8')
+      setGridSpacing('2')
+      setIsGridStopLossEnabled(false)
+      setGridStopLoss('10')
+    } catch (error) {
+      setCreateBotError(error instanceof Error ? error.message : 'Unable to create the bot right now.')
+    } finally {
+      setIsCreatingBot(false)
     }
   }
 
@@ -691,11 +746,11 @@ function DashboardPage() {
               value={formatCurrency(metricsData.totalBalance)}
             />
             <MetricCard
-              accent="positive"
+              accent={metricsData.profit24h >= 0 ? 'positive' : 'negative'}
               footer={<span className="text-xs font-normal text-zinc-500">{metricsData.trades24h} trades executed</span>}
               icon="solar:graph-up-linear"
               label="24h Profit"
-              value={`+${formatCurrency(metricsData.profit24h)}`}
+              value={`${metricsData.profit24h > 0 ? '+' : ''}${formatCurrency(metricsData.profit24h)}`}
             />
             <MetricCard
               footer={
@@ -818,108 +873,129 @@ function DashboardPage() {
             <div className="flex flex-col lg:col-span-2">
               <div className="mb-4 flex items-center justify-between">
                 <h2 className="text-base font-medium tracking-tight text-zinc-100">Active Strategies</h2>
-                <Link
+                <button
                   className="flex items-center gap-1.5 rounded-md bg-zinc-100 px-3 py-1.5 text-xs font-normal text-zinc-900 transition-colors hover:bg-zinc-200"
-                  to="/bots"
+                  type="button"
+                  onClick={() => {
+                    setCreateBotError(undefined)
+                    setSelectedBotType('grid')
+                    setIsCreateBotModalOpen(true)
+                  }}
                 >
                   <Icon icon="solar:add-circle-linear" width={16} height={16} />
                   New Bot
-                </Link>
+                </button>
               </div>
 
               <div className="flex-1 overflow-hidden rounded-xl border border-zinc-800/50 bg-zinc-900/30">
-                <div className="overflow-x-auto">
-                  <table className="w-full whitespace-nowrap text-left text-sm">
-                    <thead className="border-b border-zinc-800/50 bg-zinc-900/20 text-xs font-normal uppercase tracking-wider text-zinc-500">
-                      <tr>
-                        <th className="px-5 py-3">Bot Name</th>
-                        <th className="px-5 py-3">Pair / Exchange</th>
-                        <th className="px-5 py-3">Strategy</th>
-                        <th className="px-5 py-3 text-right">Unrealized PnL</th>
-                        <th className="px-5 py-3 text-center">Status</th>
-                        <th className="px-5 py-3" />
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {botStrategies.map((bot) => {
-                        const tone = toneClasses(bot.tone)
-                        const isSelected = bot.key === selectedStrategy
-                        return (
-                          <tr
-                            className={cx(
-                              'border-t border-zinc-800/30 transition-colors',
-                              bot.status === 'stopped' && 'opacity-60',
-                              isSelected ? 'bg-zinc-900/40' : 'hover:bg-zinc-900/20',
-                            )}
-                            key={bot.id}
-                          >
-                            <td className="px-5 py-4">
-                              <button
-                                className="flex items-center gap-3 text-left"
-                                type="button"
-                                onClick={() => setSelectedStrategy(bot.key)}
-                              >
+                {dashboard.activeStrategies.length ? (
+                  <div className="overflow-x-auto">
+                    <table className="w-full whitespace-nowrap text-left text-sm">
+                      <thead className="border-b border-zinc-800/50 bg-zinc-900/20 text-xs font-normal uppercase tracking-wider text-zinc-500">
+                        <tr>
+                          <th className="px-5 py-3">Bot Name</th>
+                          <th className="px-5 py-3">Pair / Exchange</th>
+                          <th className="px-5 py-3">Strategy</th>
+                          <th className="px-5 py-3 text-right">Unrealized PnL</th>
+                          <th className="px-5 py-3 text-center">Status</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {dashboard.activeStrategies.map((bot) => {
+                          const palette = strategyTone(bot.strategy)
+                          const tone = toneClasses(palette.tone)
+                          const isPositive = bot.unrealizedPnlUsd >= 0
+                          return (
+                            <tr
+                              className="border-t border-zinc-800/30 transition-colors hover:bg-zinc-900/20"
+                              key={bot.id}
+                            >
+                              <td className="px-5 py-4">
+                                <div className="flex items-center gap-3">
+                                  <div
+                                    className={cx(
+                                      'flex h-8 w-8 items-center justify-center rounded-md border',
+                                      tone.box,
+                                    )}
+                                  >
+                                    <Icon className={tone.icon} icon={palette.icon} width={16} height={16} />
+                                  </div>
+                                  <div className="min-w-0">
+                                    <div className="font-medium text-zinc-200">{bot.name}</div>
+                                    <div className="truncate text-xs text-zinc-500">
+                                      Started {formatTimeAgo(bot.createdAt)} • {bot.tradeCount} trade
+                                      {bot.tradeCount === 1 ? '' : 's'} recorded
+                                    </div>
+                                  </div>
+                                </div>
+                              </td>
+                              <td className="px-5 py-4">
+                                <div className="text-zinc-300">{bot.symbol}</div>
+                                <div className="text-xs text-zinc-500">{bot.exchange}</div>
+                              </td>
+                              <td className="px-5 py-4">
+                                <div className="text-zinc-300">{bot.strategyLabel}</div>
+                                <div className="max-w-xs truncate text-xs text-zinc-500">
+                                  {bot.configSummary}
+                                </div>
+                              </td>
+                              <td className="px-5 py-4 text-right">
                                 <div
                                   className={cx(
-                                    'flex h-8 w-8 items-center justify-center rounded-md border',
-                                    tone.box,
+                                    'font-medium',
+                                    isPositive ? 'text-emerald-400' : 'text-rose-400',
                                   )}
                                 >
-                                  <Icon className={tone.icon} icon={bot.icon} width={16} height={16} />
+                                  {bot.unrealizedPnlUsd > 0 ? '+' : ''}
+                                  {formatCurrency(bot.unrealizedPnlUsd)}
                                 </div>
-                                <div>
-                                  <div className="font-medium text-zinc-200">{bot.name}</div>
-                                  <div className="text-xs text-zinc-500">Uptime: {bot.uptime}</div>
-                                </div>
-                              </button>
-                            </td>
-                            <td className="px-5 py-4">
-                              <div className="text-zinc-300">{bot.pair}</div>
-                              <div className="text-xs text-zinc-500">{bot.exchange}</div>
-                            </td>
-                            <td className="px-5 py-4 text-zinc-400">{bot.strategy}</td>
-                            <td className="px-5 py-4 text-right">
-                              <div className="font-medium text-emerald-400">
-                                {bot.pnl > 0 ? '+' : ''}
-                                {formatCurrency(bot.pnl)}
-                              </div>
-                              <div className="text-xs text-emerald-400/80">
-                                {bot.pnlPercent > 0 ? '+' : ''}
-                                {bot.pnlPercent}%
-                              </div>
-                            </td>
-                            <td className="px-5 py-4 text-center">
-                              <button
-                                aria-checked={bot.status === 'running'}
-                                aria-label={`${bot.name} status`}
-                                className={cx(
-                                  'relative inline-flex h-5 w-9 rounded-full transition-colors',
-                                  bot.status === 'running' ? 'bg-zinc-200' : 'bg-zinc-800',
-                                )}
-                                role="switch"
-                                type="button"
-                              >
-                                <span
+                                <div
                                   className={cx(
-                                    'absolute top-0.5 h-4 w-4 rounded-full border transition-all',
-                                    bot.status === 'running'
-                                      ? 'left-[18px] border-zinc-950 bg-zinc-950'
-                                      : 'left-0.5 border-zinc-600 bg-zinc-500',
+                                    'text-xs',
+                                    isPositive ? 'text-emerald-400/80' : 'text-rose-400/80',
                                   )}
-                                />
-                              </button>
-                            </td>
-                            <td className="px-5 py-4 text-right">
-                              <button className="p-1 text-zinc-500 transition-colors hover:text-zinc-300" type="button">
-                                <Icon icon="solar:menu-dots-linear" width={18} height={18} />
-                              </button>
-                            </td>
-                          </tr>
-                        )
-                      })}
-                    </tbody>
-                  </table>
-                </div>
+                                >
+                                  {formatPercent(bot.unrealizedPnlPct)}
+                                </div>
+                              </td>
+                              <td className="px-5 py-4 text-center">
+                                <span className="inline-flex items-center gap-2 rounded-full border border-emerald-400/20 bg-emerald-400/10 px-3 py-1 text-xs font-medium text-emerald-300">
+                                  <span className="h-1.5 w-1.5 rounded-full bg-emerald-400" />
+                                  Running
+                                </span>
+                              </td>
+                            </tr>
+                          )
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                ) : (
+                  <div className="flex h-full min-h-72 flex-col items-center justify-center gap-4 px-6 py-12 text-center">
+                    <div className="flex h-14 w-14 items-center justify-center rounded-2xl border border-zinc-800 bg-zinc-900 text-zinc-400">
+                      <Icon icon="solar:cpu-bolt-linear" width={26} height={26} />
+                    </div>
+                    <div className="max-w-md">
+                      <h3 className="text-lg font-medium text-zinc-100">No active strategies yet</h3>
+                      <p className="mt-2 text-sm leading-6 text-zinc-500">
+                        Launch your first Grid Bot from the dashboard. We will persist the bot
+                        config and every planned trade in SQLite as soon as you start it.
+                      </p>
+                    </div>
+                    <button
+                      className="inline-flex items-center gap-2 rounded-xl border border-emerald-400/30 bg-emerald-400/10 px-4 py-2 text-sm font-medium text-emerald-200 transition hover:border-emerald-300/50 hover:bg-emerald-400/15"
+                      type="button"
+                      onClick={() => {
+                        setCreateBotError(undefined)
+                        setSelectedBotType('grid')
+                        setIsCreateBotModalOpen(true)
+                      }}
+                    >
+                      <Icon icon="solar:add-circle-linear" width={16} height={16} />
+                      Create your first bot
+                    </button>
+                  </div>
+                )}
                 <div className="flex items-center justify-center border-t border-zinc-800/50 bg-zinc-900/10 px-5 py-3">
                   <Link className="text-xs font-normal text-zinc-400 transition-colors hover:text-zinc-200" to="/bots">
                     View All Strategies
@@ -988,6 +1064,238 @@ function DashboardPage() {
           </div>
         </div>
       </main>
+
+      {isCreateBotModalOpen ? (
+        <div className="fixed inset-0 z-40 flex items-center justify-center bg-black/65 px-4 backdrop-blur-sm">
+          <button
+            aria-label="Close new bot modal"
+            className="absolute inset-0"
+            type="button"
+            onClick={() => {
+              if (isCreatingBot) return
+              setIsCreateBotModalOpen(false)
+            }}
+          />
+          <div className="relative z-10 w-full max-w-5xl overflow-hidden rounded-3xl border border-zinc-800 bg-zinc-950 shadow-2xl shadow-black/60">
+            <div className="grid gap-0 lg:grid-cols-[1.15fr_0.95fr]">
+              <div className="border-b border-zinc-800/80 bg-[radial-gradient(circle_at_top,_rgba(16,185,129,0.14),_transparent_56%)] p-6 lg:border-b-0 lg:border-r">
+                <p className="text-xs font-medium uppercase tracking-[0.3em] text-emerald-400/80">
+                  Strategy Launcher
+                </p>
+                <h2 className="mt-2 text-3xl font-medium tracking-tight text-zinc-100">
+                  Which bot do you want to create?
+                </h2>
+                <p className="mt-3 max-w-xl text-sm leading-6 text-zinc-400">
+                  Pick a strategy card first. Grid Bot is fully wired: the dashboard will POST the
+                  config to the backend, create the active strategy, and store the generated trades
+                  in SQLite immediately.
+                </p>
+
+                <div className="mt-6 grid gap-4">
+                  {botCatalog.map((bot) => {
+                    const isSelected = bot.key === selectedBotType
+                    return (
+                      <button
+                        className={cx(
+                          'rounded-2xl border px-5 py-5 text-left transition',
+                          bot.accent,
+                          isSelected
+                            ? 'border-zinc-100/20 shadow-[0_0_0_1px_rgba(244,244,245,0.14)]'
+                            : 'border-zinc-800 hover:border-zinc-700',
+                          !bot.availableNow && 'opacity-80',
+                        )}
+                        key={bot.key}
+                        type="button"
+                        onClick={() => {
+                          setCreateBotError(undefined)
+                          setSelectedBotType(bot.key)
+                        }}
+                      >
+                        <div className="flex items-start justify-between gap-4">
+                          <div>
+                            <p className="text-[11px] font-semibold uppercase tracking-[0.28em] text-zinc-500">
+                              {bot.eyebrow}
+                            </p>
+                            <h3 className="mt-2 text-xl font-medium text-zinc-100">
+                              {strategyLabels[bot.key]}
+                            </h3>
+                          </div>
+                          <div className="flex h-11 w-11 items-center justify-center rounded-2xl border border-white/10 bg-zinc-950/60 text-zinc-100">
+                            <Icon icon={bot.icon} width={20} height={20} />
+                          </div>
+                        </div>
+                        <p className="mt-3 text-sm leading-6 text-zinc-400">{bot.description}</p>
+                      </button>
+                    )
+                  })}
+                </div>
+              </div>
+
+              <div className="p-6">
+                {selectedBotType === 'grid' ? (
+                  <form className="space-y-5" onSubmit={handleCreateBotSubmit}>
+                    <div>
+                      <p className="text-xs font-medium uppercase tracking-[0.3em] text-zinc-500">
+                        Grid Bot Parameters
+                      </p>
+                      <h3 className="mt-2 text-2xl font-medium tracking-tight text-zinc-100">
+                        Configure the range and ladder
+                      </h3>
+                      <p className="mt-2 text-sm leading-6 text-zinc-400">
+                        These values define the BTC/USDT paper grid that will be started and
+                        recorded as an active strategy.
+                      </p>
+                    </div>
+
+                    <div className="grid gap-4 sm:grid-cols-2">
+                      <label className="block">
+                        <span className="mb-2 block text-sm font-medium text-zinc-300">Lower price</span>
+                        <input
+                          className="w-full rounded-xl border border-zinc-800 bg-zinc-900/80 px-4 py-3 text-zinc-100 outline-none transition placeholder:text-zinc-600 focus:border-emerald-400/50 focus:ring-1 focus:ring-emerald-400/50"
+                          inputMode="decimal"
+                          placeholder="84000"
+                          type="number"
+                          min="0.01"
+                          step="0.01"
+                          value={gridLowerPrice}
+                          onChange={(event) => setGridLowerPrice(event.target.value)}
+                        />
+                      </label>
+                      <label className="block">
+                        <span className="mb-2 block text-sm font-medium text-zinc-300">Upper price</span>
+                        <input
+                          className="w-full rounded-xl border border-zinc-800 bg-zinc-900/80 px-4 py-3 text-zinc-100 outline-none transition placeholder:text-zinc-600 focus:border-emerald-400/50 focus:ring-1 focus:ring-emerald-400/50"
+                          inputMode="decimal"
+                          placeholder="92000"
+                          type="number"
+                          min="0.01"
+                          step="0.01"
+                          value={gridUpperPrice}
+                          onChange={(event) => setGridUpperPrice(event.target.value)}
+                        />
+                      </label>
+                      <label className="block">
+                        <span className="mb-2 block text-sm font-medium text-zinc-300">Grid levels</span>
+                        <input
+                          className="w-full rounded-xl border border-zinc-800 bg-zinc-900/80 px-4 py-3 text-zinc-100 outline-none transition placeholder:text-zinc-600 focus:border-emerald-400/50 focus:ring-1 focus:ring-emerald-400/50"
+                          inputMode="numeric"
+                          type="number"
+                          min="2"
+                          step="1"
+                          value={gridCount}
+                          onChange={(event) => setGridCount(event.target.value)}
+                        />
+                      </label>
+                      <label className="block">
+                        <span className="mb-2 block text-sm font-medium text-zinc-300">Spacing (%)</span>
+                        <input
+                          className="w-full rounded-xl border border-zinc-800 bg-zinc-900/80 px-4 py-3 text-zinc-100 outline-none transition placeholder:text-zinc-600 focus:border-emerald-400/50 focus:ring-1 focus:ring-emerald-400/50"
+                          inputMode="decimal"
+                          type="number"
+                          min="0.01"
+                          step="0.1"
+                          value={gridSpacing}
+                          onChange={(event) => setGridSpacing(event.target.value)}
+                        />
+                      </label>
+                      <div className="sm:col-span-2 rounded-2xl border border-zinc-800 bg-zinc-900/50 p-4">
+                        <div className="flex items-center justify-between gap-4">
+                          <div>
+                            <p className="text-sm font-medium text-zinc-200">Stop loss</p>
+                            <p className="mt-1 text-xs leading-5 text-zinc-500">
+                              Turn this on only if you want the grid to warn when price breaks below
+                              your defined safety threshold.
+                            </p>
+                          </div>
+                          <button
+                            aria-checked={isGridStopLossEnabled}
+                            aria-label="Toggle stop loss"
+                            className={cx(
+                              'relative inline-flex h-7 w-12 rounded-full transition-colors',
+                              isGridStopLossEnabled ? 'bg-emerald-400' : 'bg-zinc-800',
+                            )}
+                            role="switch"
+                            type="button"
+                            onClick={() => setIsGridStopLossEnabled((current) => !current)}
+                          >
+                            <span
+                              className={cx(
+                                'absolute top-1 h-5 w-5 rounded-full transition-all',
+                                isGridStopLossEnabled
+                                  ? 'left-6 bg-zinc-950'
+                                  : 'left-1 bg-zinc-500',
+                              )}
+                            />
+                          </button>
+                        </div>
+
+                        {isGridStopLossEnabled ? (
+                          <label className="mt-4 block">
+                            <span className="mb-2 block text-sm font-medium text-zinc-300">
+                              Stop loss (%)
+                            </span>
+                            <input
+                              className="w-full rounded-xl border border-zinc-800 bg-zinc-900/80 px-4 py-3 text-zinc-100 outline-none transition placeholder:text-zinc-600 focus:border-emerald-400/50 focus:ring-1 focus:ring-emerald-400/50"
+                              inputMode="decimal"
+                              type="number"
+                              min="0.01"
+                              step="0.1"
+                              value={gridStopLoss}
+                              onChange={(event) => setGridStopLoss(event.target.value)}
+                            />
+                          </label>
+                        ) : null}
+                      </div>
+                    </div>
+
+                    <div className="rounded-2xl border border-zinc-800 bg-zinc-900/60 p-4 text-sm leading-6 text-zinc-400">
+                      Starting this bot creates a live dashboard entry and stores each planned grid
+                      order in the paper-trading SQLite ledger.
+                    </div>
+
+                    {createBotError ? (
+                      <div className="rounded-xl border border-rose-500/20 bg-rose-500/10 px-4 py-3 text-sm text-rose-300">
+                        {createBotError}
+                      </div>
+                    ) : null}
+
+                    <div className="flex items-center justify-end gap-3">
+                      <button
+                        className="rounded-xl border border-zinc-700 px-4 py-2 text-sm text-zinc-300 transition hover:border-zinc-500 hover:text-zinc-100"
+                        disabled={isCreatingBot}
+                        type="button"
+                        onClick={() => setIsCreateBotModalOpen(false)}
+                      >
+                        Cancel
+                      </button>
+                      <button
+                        className="rounded-xl bg-emerald-400 px-4 py-2 text-sm font-medium text-zinc-950 transition hover:bg-emerald-300 disabled:cursor-not-allowed disabled:bg-emerald-400/60"
+                        disabled={isCreatingBot}
+                        type="submit"
+                      >
+                        {isCreatingBot ? 'Starting bot...' : 'Start bot'}
+                      </button>
+                    </div>
+                  </form>
+                ) : (
+                  <div className="flex h-full min-h-96 flex-col justify-center rounded-2xl border border-dashed border-zinc-800 bg-zinc-900/40 p-6 text-center">
+                    <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-2xl border border-zinc-800 bg-zinc-950 text-zinc-400">
+                      <Icon icon="solar:clock-circle-linear" width={24} height={24} />
+                    </div>
+                    <h3 className="mt-5 text-2xl font-medium tracking-tight text-zinc-100">
+                      {strategyLabels[selectedBotType]} is next in line
+                    </h3>
+                    <p className="mt-3 text-sm leading-6 text-zinc-400">
+                      The selection card is here already, but the parameter form and backend start
+                      flow are only wired for Grid Bot in this pass.
+                    </p>
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+        </div>
+      ) : null}
 
       {isDepositModalOpen ? (
         <div className="fixed inset-0 z-40 flex items-center justify-center bg-black/65 px-4 backdrop-blur-sm">

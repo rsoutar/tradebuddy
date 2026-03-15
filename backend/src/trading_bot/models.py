@@ -63,7 +63,8 @@ class GridBotConfig:
     upper_price: float
     grid_count: int
     spacing_pct: float
-    stop_loss_pct: float = 10.0
+    stop_loss_enabled: bool = False
+    stop_loss_pct: Optional[float] = None
 
     def validate(self) -> None:
         if self.lower_price <= 0 or self.upper_price <= 0:
@@ -74,8 +75,9 @@ class GridBotConfig:
             raise ValueError("Grid bot requires at least 2 grid levels.")
         if self.spacing_pct <= 0:
             raise ValueError("Grid spacing must be greater than 0.")
-        if self.stop_loss_pct <= 0:
-            raise ValueError("Stop-loss percentage must be greater than 0.")
+        if self.stop_loss_enabled:
+            if self.stop_loss_pct is None or self.stop_loss_pct <= 0:
+                raise ValueError("Stop-loss percentage must be greater than 0 when enabled.")
 
 
 @dataclass(frozen=True)
@@ -121,4 +123,3 @@ class StrategyEvaluation:
     orders: list[OrderIntent] = field(default_factory=list)
     warnings: list[str] = field(default_factory=list)
     metrics: dict[str, float] = field(default_factory=dict)
-

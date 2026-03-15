@@ -5,7 +5,7 @@ import logging
 import threading
 import time
 from dataclasses import replace
-from typing import Any
+from typing import Any, Optional
 
 from websocket import WebSocketApp
 
@@ -37,12 +37,12 @@ class BinanceSpotWebSocketMarketData:
         self._snapshot_lock = threading.Lock()
         self._snapshot_ready = threading.Event()
         self._stop_event = threading.Event()
-        self._thread: threading.Thread | None = None
-        self._websocket: WebSocketApp | None = None
-        self._latest_snapshot: MarketSnapshot | None = None
-        self._last_error: str | None = None
+        self._thread: Optional[threading.Thread] = None
+        self._websocket: Optional[WebSocketApp] = None
+        self._latest_snapshot: Optional[MarketSnapshot] = None
+        self._last_error: Optional[str] = None
 
-    def get_snapshot(self, symbol: str) -> MarketSnapshot | None:
+    def get_snapshot(self, symbol: str) -> Optional[MarketSnapshot]:
         if symbol != self._symbol:
             raise ValueError("Binance spot stream is restricted to BTCUSDT.")
 
@@ -71,7 +71,7 @@ class BinanceSpotWebSocketMarketData:
             self._thread.join(timeout=1.0)
 
     @property
-    def last_error(self) -> str | None:
+    def last_error(self) -> Optional[str]:
         return self._last_error
 
     def _run_forever(self) -> None:
@@ -107,8 +107,8 @@ class BinanceSpotWebSocketMarketData:
     def _on_close(
         self,
         websocket: WebSocketApp,
-        status_code: int | None,
-        message: str | None,
+        status_code: Optional[int],
+        message: Optional[str],
     ) -> None:
         logger.info(
             "Binance spot WebSocket closed for %s (code=%s, message=%s)",

@@ -1,13 +1,13 @@
 from __future__ import annotations
 
-from typing import Protocol
+from typing import Optional, Protocol
 
 from trading_bot.models import MarketSnapshot
 from trading_bot.services.exchange import ExchangeClient
 
 
 class MarketDataStream(Protocol):
-    def get_snapshot(self, symbol: str) -> MarketSnapshot | None:
+    def get_snapshot(self, symbol: str) -> Optional[MarketSnapshot]:
         ...
 
 
@@ -15,7 +15,7 @@ class MarketDataService:
     def __init__(
         self,
         exchange_client: ExchangeClient,
-        market_stream: MarketDataStream | None = None,
+        market_stream: Optional[MarketDataStream] = None,
     ) -> None:
         self._exchange_client = exchange_client
         self._market_stream = market_stream

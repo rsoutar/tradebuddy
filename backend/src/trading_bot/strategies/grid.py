@@ -63,7 +63,11 @@ class GridStrategy(Strategy):
                     )
 
         warnings: list[str] = []
-        if current_price < lower * (1 - self._config.stop_loss_pct / 100):
+        if (
+            self._config.stop_loss_enabled
+            and self._config.stop_loss_pct is not None
+            and current_price < lower * (1 - self._config.stop_loss_pct / 100)
+        ):
             warnings.append("Price is beyond the configured stop-loss threshold.")
         if current_price > upper:
             warnings.append("Price is above the configured grid range; orders may need to be rebuilt.")
@@ -75,4 +79,3 @@ class GridStrategy(Strategy):
             warnings=warnings,
             metrics={"grid_step": round(step, 2), "price": current_price},
         )
-

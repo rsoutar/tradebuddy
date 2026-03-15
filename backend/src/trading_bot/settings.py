@@ -3,6 +3,7 @@ from __future__ import annotations
 import os
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Optional
 
 
 def _parse_bool(raw: str, default: bool = False) -> bool:
@@ -11,7 +12,7 @@ def _parse_bool(raw: str, default: bool = False) -> bool:
     return raw.strip().lower() in {"1", "true", "yes", "on"}
 
 
-def _parse_csv(raw: str | None, default: list[str]) -> list[str]:
+def _parse_csv(raw: Optional[str], default: list[str]) -> list[str]:
     if raw is None:
         return default
     return [value.strip() for value in raw.split(",") if value.strip()] or default

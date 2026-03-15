@@ -38,6 +38,31 @@ def test_grid_strategy_generates_orders_on_both_sides():
     assert any(order.side.value == "sell" for order in evaluation.orders)
 
 
+def test_grid_strategy_skips_stop_loss_warning_when_disabled():
+    strategy = GridStrategy(
+        GridBotConfig(
+            lower_price=62000.0,
+            upper_price=74000.0,
+            grid_count=7,
+            spacing_pct=2.0,
+            stop_loss_enabled=False,
+            stop_loss_pct=None,
+        )
+    )
+    stressed_snapshot = MarketSnapshot(
+        symbol="BTC/USDT",
+        price=50000.0,
+        change_24h_pct=-8.2,
+        volume_24h=1000000.0,
+        volatility_24h_pct=6.5,
+        trend="bearish",
+    )
+
+    evaluation = strategy.evaluate(stressed_snapshot, BALANCES)
+
+    assert "stop-loss threshold" not in " ".join(evaluation.warnings)
+
+
 def test_rebalance_strategy_skips_when_portfolio_is_near_target():
     strategy = RebalanceStrategy(
         RebalanceBotConfig(
@@ -67,4 +92,3 @@ def test_infinity_grid_strategy_prepares_upward_grid_entries():
 
     assert len(evaluation.orders) == 6
     assert evaluation.metrics["anchor_price"] == SNAPSHOT.price
-

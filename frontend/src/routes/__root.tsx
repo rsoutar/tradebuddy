@@ -47,7 +47,7 @@ function RootComponent() {
   const pathname = useRouterState({
     select: (state) => state.location.pathname,
   })
-  const isDashboardRoute = pathname === '/dashboard'
+  const isDashboardRoute = pathname === '/dashboard' || pathname === '/history'
 
   async function handleLogout() {
     try {
@@ -91,6 +91,9 @@ function RootComponent() {
                 </Link>
                 <Link to="/bots" activeProps={{ className: 'active' }}>
                   Strategies
+                </Link>
+                <Link to="/history" activeProps={{ className: 'active' }}>
+                  History
                 </Link>
                 <Link to="/ai" activeProps={{ className: 'active' }}>
                   Research
@@ -142,7 +145,8 @@ function RootDocument({ children }: Readonly<{ children: ReactNode }>) {
   const pathname = useRouterState({
     select: (state) => state.location.pathname,
   })
-  const bodyClassName = pathname === '/dashboard' ? 'dark-dashboard-body' : 'app-body'
+  const bodyClassName =
+    pathname === '/dashboard' || pathname === '/history' ? 'dark-dashboard-body' : 'app-body'
 
   return (
     <html lang="en">

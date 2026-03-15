@@ -28,6 +28,57 @@ export type BotMetric = {
   lastSignal: string
 }
 
+export type ActiveStrategy = {
+  id: string
+  name: string
+  strategy: StrategyKey
+  strategyLabel: string
+  symbol: string
+  exchange: string
+  status: 'paper-running'
+  tradeCount: number
+  buyCount: number
+  sellCount: number
+  totalNotionalUsd: number
+  unrealizedPnlUsd: number
+  unrealizedPnlPct: number
+  configSummary: string
+  createdAt: string
+  lastTradeAt?: string
+}
+
+export type PaperTrade = {
+  id: string
+  botId: string
+  botName: string
+  strategy: StrategyKey
+  strategyLabel: string
+  config: Record<string, unknown>
+  symbol: string
+  side: 'buy' | 'sell'
+  orderType: 'limit' | 'market'
+  amount: number
+  price: number
+  notionalUsd: number
+  rationale: string
+  status: string
+  createdAt: string
+}
+
+export type TradeHistoryState = {
+  summary: {
+    totalTrades: number
+    plannedTrades: number
+    buyTrades: number
+    sellTrades: number
+    totalNotionalUsd: number
+    activeBotCount: number
+    latestTradeAt?: string
+    paperRunCount: number
+  }
+  trades: PaperTrade[]
+}
+
 export type BacktestSummary = {
   strategy: StrategyKey
   periodLabel: string
@@ -56,7 +107,17 @@ export type DashboardState = {
   lastPaperRunAt?: string
   lastBacktest?: BacktestSummary
   bots: BotMetric[]
+  activeStrategies: ActiveStrategy[]
   events: ActivityEvent[]
+}
+
+export type GridBotInput = {
+  lowerPrice: number
+  upperPrice: number
+  gridCount: number
+  spacingPct: number
+  stopLossEnabled: boolean
+  stopLossPct?: number
 }
 
 type SessionData = {
@@ -156,6 +217,8 @@ async function createPkcePair() {
 type BackendDashboardEnvelope = {
   dashboard: DashboardState
 }
+
+type BackendTradeHistoryEnvelope = TradeHistoryState
 
 function getBackendApiBaseUrl() {
   return process.env.VITE_API_BASE_URL ?? 'http://127.0.0.1:8000'
@@ -372,6 +435,20 @@ export const getDashboard = createServerFn({ method: 'GET' }).handler(async () =
   }
 })
 
+export const getTradeHistory = createServerFn({ method: 'GET' }).handler(async () => {
+  const session = await useSession<SessionData>(getSessionConfig())
+
+  if (!session.data.user) {
+    throw new Error('You need to sign in before opening trade history.')
+  }
+
+  const url = new URL('/api/trades', getBackendApiBaseUrl())
+  url.searchParams.set('user_id', session.data.user.userId)
+  url.searchParams.set('user_name', session.data.user.displayName)
+
+  return fetchBackend<BackendTradeHistoryEnvelope>(url.toString())
+})
+
 export const runPaperTrading = createServerFn({ method: 'POST' }).handler(
   async ({ data }) => {
     const input = (data ?? {}) as { strategy: StrategyKey }
@@ -423,6 +500,44 @@ export const runBacktest = createServerFn({ method: 'POST' }).handler(
     return payload.dashboard
   },
 )
+
+export const createBot = createServerFn({ method: 'POST' }).handler(async ({ data }) => {
+  const input = (data ?? {}) as {
+    strategy: StrategyKey
+    gridConfig?: GridBotInput
+  }
+  const session = await useSession<SessionData>(getSessionConfig())
+
+  if (!session.data.user) {
+    throw new Error('You need to sign in before creating a bot.')
+  }
+
+  const payload = await fetchBackend<BackendDashboardEnvelope>(
+    new URL('/api/bots', getBackendApiBaseUrl()).toString(),
+    {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        strategy: input.strategy,
+        grid_config: input.gridConfig
+          ? {
+              lower_price: input.gridConfig.lowerPrice,
+              upper_price: input.gridConfig.upperPrice,
+              grid_count: input.gridConfig.gridCount,
+              spacing_pct: input.gridConfig.spacingPct,
+              stop_loss_enabled: input.gridConfig.stopLossEnabled,
+              stop_loss_pct: input.gridConfig.stopLossPct,
+            }
+          : undefined,
+        ...getUserScope(session.data.user),
+      }),
+    },
+  )
+
+  return payload.dashboard
+})
 
 export const depositPaperFunds = createServerFn({ method: 'POST' }).handler(
   async ({ data }) => {
