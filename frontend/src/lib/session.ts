@@ -146,6 +146,7 @@ export type BacktestSummary = {
   feeRate?: number
   slippageRate?: number
   stopLossTriggered?: boolean
+  upperPriceStopTriggered?: boolean
   warnings?: string[]
   tradeLog?: BacktestTradeRecord[]
 }
@@ -187,6 +188,7 @@ export type GridBotInput = {
   upperPrice: number
   gridCount: number
   spacingPct: number
+  stopAtUpperEnabled?: boolean
   stopLossEnabled: boolean
   stopLossPct?: number
 }
@@ -630,6 +632,7 @@ export const runBacktest = createServerFn({ method: 'POST' }).handler(
                 upper_price: input.gridConfig.upperPrice,
                 grid_count: input.gridConfig.gridCount,
                 spacing_pct: input.gridConfig.spacingPct,
+                stop_at_upper_enabled: input.gridConfig.stopAtUpperEnabled,
                 stop_loss_enabled: input.gridConfig.stopLossEnabled,
                 stop_loss_pct: input.gridConfig.stopLossPct,
               }
@@ -669,6 +672,7 @@ export const createBot = createServerFn({ method: 'POST' }).handler(async ({ dat
               upper_price: input.gridConfig.upperPrice,
               grid_count: input.gridConfig.gridCount,
               spacing_pct: input.gridConfig.spacingPct,
+              stop_at_upper_enabled: input.gridConfig.stopAtUpperEnabled,
               stop_loss_enabled: input.gridConfig.stopLossEnabled,
               stop_loss_pct: input.gridConfig.stopLossPct,
             }

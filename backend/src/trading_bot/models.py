@@ -81,8 +81,31 @@ class GridBotConfig:
     upper_price: float
     grid_count: int
     spacing_pct: float
+    stop_at_upper_enabled: bool = False
     stop_loss_enabled: bool = False
     stop_loss_pct: Optional[float] = None
+
+    def price_levels(self) -> list[float]:
+        factor = 1 + (self.spacing_pct / 100)
+        levels = [round(self.lower_price, 2)]
+        current_level = self.lower_price
+
+        for _ in range(1, self.grid_count):
+            next_level = current_level * factor
+            if next_level >= self.upper_price:
+                rounded_upper = round(self.upper_price, 2)
+                if rounded_upper > levels[-1]:
+                    levels.append(rounded_upper)
+                break
+
+            rounded_level = round(next_level, 2)
+            if rounded_level <= levels[-1]:
+                break
+
+            levels.append(rounded_level)
+            current_level = next_level
+
+        return levels
 
     def validate(self) -> None:
         if self.lower_price <= 0 or self.upper_price <= 0:
@@ -93,6 +116,8 @@ class GridBotConfig:
             raise ValueError("Grid bot requires at least 2 grid levels.")
         if self.spacing_pct <= 0:
             raise ValueError("Grid spacing must be greater than 0.")
+        if len(self.price_levels()) < 2:
+            raise ValueError("Grid configuration must produce at least 2 price levels within range.")
         if self.stop_loss_enabled:
             if self.stop_loss_pct is None or self.stop_loss_pct <= 0:
                 raise ValueError("Stop-loss percentage must be greater than 0 when enabled.")

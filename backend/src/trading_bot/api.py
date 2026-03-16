@@ -27,6 +27,7 @@ class GridConfigRequest(BaseModel):
     upper_price: float = Field(gt=0)
     grid_count: int = Field(ge=2)
     spacing_pct: float = Field(gt=0)
+    stop_at_upper_enabled: bool = False
     stop_loss_enabled: bool = False
     stop_loss_pct: Optional[float] = Field(default=None, gt=0)
 

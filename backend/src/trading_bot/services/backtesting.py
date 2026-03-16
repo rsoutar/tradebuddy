@@ -44,6 +44,7 @@ class BacktestResult:
     fee_rate: float
     slippage_rate: float
     stop_loss_triggered: bool
+    upper_price_stop_triggered: bool
     warnings: list[str]
     trade_log: list[dict[str, object]]
 
@@ -63,6 +64,7 @@ class BacktestResult:
             "feeRate": self.fee_rate,
             "slippageRate": self.slippage_rate,
             "stopLossTriggered": self.stop_loss_triggered,
+            "upperPriceStopTriggered": self.upper_price_stop_triggered,
             "warnings": self.warnings,
             "tradeLog": self.trade_log,
         }
@@ -91,6 +93,7 @@ class GridBacktestRunner:
         end: datetime | None = None,
         completed_at: datetime | None = None,
     ) -> BacktestResult:
+        config.validate()
         candles = self._historical_loader.load_candles(start=start, end=end)
         if not candles:
             raise ValueError("No historical candles available for the requested backtest window.")
@@ -107,10 +110,13 @@ class GridBacktestRunner:
         trade_log: list[BacktestTrade] = []
         warnings: list[str] = []
         stop_loss_triggered = False
+        upper_price_stop_triggered = False
 
-        per_level_notional = max(capital * 0.9 / max(config.grid_count - 1, 1), 10.0)
+        per_level_notional = max(capital * 0.9 / max(len(levels) - 1, 1), 10.0)
         active_orders = self._initialize_active_orders(levels, initial_price)
         equity_curve: list[float] = [capital]
+        final_mark_price = initial_price
+        final_open_time = candles[0].open_time
 
         for candle in candles:
             stop_price = self._stop_price(config)
@@ -129,9 +135,11 @@ class GridBacktestRunner:
                 stop_loss_triggered = True
                 warnings.append("Stop-loss threshold was triggered and BTC inventory was liquidated.")
                 equity_curve.append(usdt_balance)
+                final_mark_price = stop_price
+                final_open_time = candle.open_time
                 break
 
-            path = self._candle_path(candle)
+            path, upper_stop_hit = self._candle_path_with_upper_stop(candle, config)
             for segment_start, segment_end in zip(path, path[1:]):
                 usdt_balance, btc_balance = self._process_segment(
                     candle=candle,
@@ -147,23 +155,29 @@ class GridBacktestRunner:
                     realized_pnls=realized_pnls,
                 )
 
-            equity_curve.append(usdt_balance + (btc_balance * candle.close))
+            mark_price = config.upper_price if upper_stop_hit else candle.close
+            equity_curve.append(usdt_balance + (btc_balance * mark_price))
+            final_mark_price = mark_price
+            final_open_time = candle.open_time
+            if upper_stop_hit:
+                upper_price_stop_triggered = True
+                warnings.append("Upper price threshold was reached and the backtest stopped.")
+                break
 
-        final_price = candles[-1].close
-        final_equity = round(usdt_balance + (btc_balance * final_price), 2)
+        final_equity = round(usdt_balance + (btc_balance * final_mark_price), 2)
         completed_at = completed_at or datetime.now(timezone.utc)
         gross_profit = sum(pnl for pnl in realized_pnls if pnl > 0)
         gross_loss = abs(sum(pnl for pnl in realized_pnls if pnl < 0))
         winning_trades = sum(1 for pnl in realized_pnls if pnl > 0)
         closed_trades = len(realized_pnls)
         duration_days = max(
-            (candles[-1].open_time - candles[0].open_time).total_seconds() / 86_400,
+            (final_open_time - candles[0].open_time).total_seconds() / 86_400,
             1 / 24,
         )
 
         return BacktestResult(
             strategy=StrategyType.GRID.value,
-            period_label=self._format_period_label(candles[0].open_time, candles[-1].open_time),
+            period_label=self._format_period_label(candles[0].open_time, final_open_time),
             started_at=candles[0].open_time.isoformat(),
             completed_at=completed_at.isoformat(),
             roi_pct=round(((final_equity / capital) - 1) * 100, 2),
@@ -177,6 +191,7 @@ class GridBacktestRunner:
             fee_rate=self._fee_rate,
             slippage_rate=self._slippage_rate,
             stop_loss_triggered=stop_loss_triggered,
+            upper_price_stop_triggered=upper_price_stop_triggered,
             warnings=warnings,
             trade_log=[self._serialize_trade(trade) for trade in trade_log],
         )
@@ -191,8 +206,7 @@ class GridBacktestRunner:
         return start, end
 
     def _build_levels(self, config: GridBotConfig) -> list[float]:
-        step = (config.upper_price - config.lower_price) / (config.grid_count - 1)
-        return [round(config.lower_price + (step * index), 2) for index in range(config.grid_count)]
+        return config.price_levels()
 
     def _initialize_active_orders(self, levels: list[float], initial_price: float) -> dict[int, str]:
         active_orders: dict[int, str] = {}
@@ -428,6 +442,37 @@ class GridBacktestRunner:
         if candle.close >= candle.open:
             return [candle.open, candle.low, candle.high, candle.close]
         return [candle.open, candle.high, candle.low, candle.close]
+
+    def _candle_path_with_upper_stop(
+        self,
+        candle: HistoricalCandle,
+        config: GridBotConfig,
+    ) -> tuple[list[float], bool]:
+        path = self._candle_path(candle)
+        if not config.stop_at_upper_enabled:
+            return path, False
+
+        if candle.open >= config.upper_price:
+            return [config.upper_price], True
+
+        truncated_path = [path[0]]
+        for next_price in path[1:]:
+            current_price = truncated_path[-1]
+            moving_up = next_price > current_price
+            touches_upper = (
+                moving_up and current_price < config.upper_price <= next_price
+            ) or (
+                not moving_up and next_price <= config.upper_price < current_price
+            )
+
+            if touches_upper:
+                if current_price != config.upper_price:
+                    truncated_path.append(config.upper_price)
+                return truncated_path, True
+
+            truncated_path.append(next_price)
+
+        return truncated_path, False
 
     def _stop_price(self, config: GridBotConfig) -> float | None:
         if not config.stop_loss_enabled or config.stop_loss_pct is None:

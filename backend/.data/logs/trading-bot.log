@@ -85,3 +85,66 @@
 2026-03-15 22:28:19,193 INFO [trading_bot.services.binance_ws] Connecting to Binance spot WebSocket: wss://data-stream.binance.vision/stream?streams=btcusdt@ticker
 2026-03-15 22:28:19,697 INFO [websocket] Websocket connected
 2026-03-15 22:28:19,697 INFO [trading_bot.services.binance_ws] Binance spot WebSocket connected for BTC/USDT
+2026-03-16 00:57:26,253 INFO [trading_bot.services.binance_ws] Connecting to Binance spot WebSocket: wss://data-stream.binance.vision/stream?streams=btcusdt@ticker
+2026-03-16 00:57:26,711 INFO [websocket] Websocket connected
+2026-03-16 00:57:26,711 INFO [trading_bot.services.binance_ws] Binance spot WebSocket connected for BTC/USDT
+2026-03-16 01:18:26,683 INFO [trading_bot.services.binance_ws] Connecting to Binance spot WebSocket: wss://data-stream.binance.vision/stream?streams=btcusdt@ticker
+2026-03-16 01:18:27,211 INFO [websocket] Websocket connected
+2026-03-16 01:18:27,211 INFO [trading_bot.services.binance_ws] Binance spot WebSocket connected for BTC/USDT
+2026-03-16 01:20:38,460 INFO [trading_bot.services.binance_ws] Connecting to Binance spot WebSocket: wss://data-stream.binance.vision/stream?streams=btcusdt@ticker
+2026-03-16 01:20:39,010 INFO [websocket] Websocket connected
+2026-03-16 01:20:39,010 INFO [trading_bot.services.binance_ws] Binance spot WebSocket connected for BTC/USDT
+2026-03-16 14:43:13,547 WARNING [trading_bot.services.binance_ws] Binance spot WebSocket error for BTC/USDT: [Errno 54] Connection reset by peer
+2026-03-16 14:43:13,548 ERROR [websocket] [Errno 54] Connection reset by peer - goodbye
+2026-03-16 14:43:13,559 INFO [trading_bot.services.binance_ws] Binance spot WebSocket closed for BTC/USDT (code=None, message=None)
+2026-03-16 14:43:16,578 INFO [trading_bot.services.binance_ws] Connecting to Binance spot WebSocket: wss://data-stream.binance.vision/stream?streams=btcusdt@ticker
+2026-03-16 14:43:17,157 INFO [websocket] Websocket connected
+2026-03-16 14:43:17,158 INFO [trading_bot.services.binance_ws] Binance spot WebSocket connected for BTC/USDT
+2026-03-16 15:50:54,648 WARNING [trading_bot.services.binance_ws] Binance spot WebSocket error for BTC/USDT: [Errno 54] Connection reset by peer
+2026-03-16 15:50:54,650 ERROR [websocket] [Errno 54] Connection reset by peer - goodbye
+2026-03-16 15:50:54,650 INFO [trading_bot.services.binance_ws] Binance spot WebSocket closed for BTC/USDT (code=None, message=None)
+2026-03-16 15:50:57,656 INFO [trading_bot.services.binance_ws] Connecting to Binance spot WebSocket: wss://data-stream.binance.vision/stream?streams=btcusdt@ticker
+2026-03-16 15:50:58,112 INFO [websocket] Websocket connected
+2026-03-16 15:50:58,112 INFO [trading_bot.services.binance_ws] Binance spot WebSocket connected for BTC/USDT
+2026-03-16 16:06:47,753 WARNING [trading_bot.services.binance_ws] Binance spot WebSocket error for BTC/USDT: [Errno 54] Connection reset by peer
+2026-03-16 16:06:47,754 ERROR [websocket] [Errno 54] Connection reset by peer - goodbye
+2026-03-16 16:06:47,755 INFO [trading_bot.services.binance_ws] Binance spot WebSocket closed for BTC/USDT (code=None, message=None)
+2026-03-16 16:06:50,762 INFO [trading_bot.services.binance_ws] Connecting to Binance spot WebSocket: wss://data-stream.binance.vision/stream?streams=btcusdt@ticker
+2026-03-16 16:06:51,217 INFO [websocket] Websocket connected
+2026-03-16 16:06:51,218 INFO [trading_bot.services.binance_ws] Binance spot WebSocket connected for BTC/USDT
+2026-03-16 16:23:46,822 WARNING [trading_bot.services.binance_ws] Binance spot WebSocket error for BTC/USDT: [Errno 54] Connection reset by peer
+2026-03-16 16:23:46,823 ERROR [websocket] [Errno 54] Connection reset by peer - goodbye
+2026-03-16 16:23:46,823 INFO [trading_bot.services.binance_ws] Binance spot WebSocket closed for BTC/USDT (code=None, message=None)
+2026-03-16 16:23:49,834 INFO [trading_bot.services.binance_ws] Connecting to Binance spot WebSocket: wss://data-stream.binance.vision/stream?streams=btcusdt@ticker
+2026-03-16 16:23:50,287 INFO [websocket] Websocket connected
+2026-03-16 16:23:50,288 INFO [trading_bot.services.binance_ws] Binance spot WebSocket connected for BTC/USDT
+2026-03-16 16:40:12,191 WARNING [trading_bot.services.binance_ws] Binance spot WebSocket error for BTC/USDT: [Errno 54] Connection reset by peer
+2026-03-16 16:40:12,192 ERROR [websocket] [Errno 54] Connection reset by peer - goodbye
+2026-03-16 16:40:12,192 INFO [trading_bot.services.binance_ws] Binance spot WebSocket closed for BTC/USDT (code=None, message=None)
+2026-03-16 16:40:15,200 INFO [trading_bot.services.binance_ws] Connecting to Binance spot WebSocket: wss://data-stream.binance.vision/stream?streams=btcusdt@ticker
+2026-03-16 16:40:15,656 INFO [websocket] Websocket connected
+2026-03-16 16:40:15,656 INFO [trading_bot.services.binance_ws] Binance spot WebSocket connected for BTC/USDT
+2026-03-16 16:55:50,169 WARNING [trading_bot.services.binance_ws] Binance spot WebSocket error for BTC/USDT: [Errno 54] Connection reset by peer
+2026-03-16 16:55:50,170 ERROR [websocket] [Errno 54] Connection reset by peer - goodbye
+2026-03-16 16:55:50,170 INFO [trading_bot.services.binance_ws] Binance spot WebSocket closed for BTC/USDT (code=None, message=None)
+2026-03-16 16:55:53,181 INFO [trading_bot.services.binance_ws] Connecting to Binance spot WebSocket: wss://data-stream.binance.vision/stream?streams=btcusdt@ticker
+2026-03-16 16:55:53,705 INFO [websocket] Websocket connected
+2026-03-16 16:55:53,706 INFO [trading_bot.services.binance_ws] Binance spot WebSocket connected for BTC/USDT
+2026-03-16 17:11:38,805 WARNING [trading_bot.services.binance_ws] Binance spot WebSocket error for BTC/USDT: [Errno 54] Connection reset by peer
+2026-03-16 17:11:38,806 ERROR [websocket] [Errno 54] Connection reset by peer - goodbye
+2026-03-16 17:11:38,806 INFO [trading_bot.services.binance_ws] Binance spot WebSocket closed for BTC/USDT (code=None, message=None)
+2026-03-16 17:11:41,819 INFO [trading_bot.services.binance_ws] Connecting to Binance spot WebSocket: wss://data-stream.binance.vision/stream?streams=btcusdt@ticker
+2026-03-16 17:11:42,270 INFO [websocket] Websocket connected
+2026-03-16 17:11:42,271 INFO [trading_bot.services.binance_ws] Binance spot WebSocket connected for BTC/USDT
+2026-03-16 17:18:06,855 WARNING [trading_bot.services.binance_ws] Binance spot WebSocket error for BTC/USDT: [Errno 54] Connection reset by peer
+2026-03-16 17:18:06,855 ERROR [websocket] [Errno 54] Connection reset by peer - goodbye
+2026-03-16 17:18:06,856 INFO [trading_bot.services.binance_ws] Binance spot WebSocket closed for BTC/USDT (code=None, message=None)
+2026-03-16 17:18:09,863 INFO [trading_bot.services.binance_ws] Connecting to Binance spot WebSocket: wss://data-stream.binance.vision/stream?streams=btcusdt@ticker
+2026-03-16 17:18:10,339 INFO [websocket] Websocket connected
+2026-03-16 17:18:10,339 INFO [trading_bot.services.binance_ws] Binance spot WebSocket connected for BTC/USDT
+2026-03-16 17:22:16,961 WARNING [trading_bot.services.binance_ws] Binance spot WebSocket error for BTC/USDT: [Errno 54] Connection reset by peer
+2026-03-16 17:22:16,963 ERROR [websocket] [Errno 54] Connection reset by peer - goodbye
+2026-03-16 17:22:16,964 INFO [trading_bot.services.binance_ws] Binance spot WebSocket closed for BTC/USDT (code=None, message=None)
+2026-03-16 17:22:19,968 INFO [trading_bot.services.binance_ws] Connecting to Binance spot WebSocket: wss://data-stream.binance.vision/stream?streams=btcusdt@ticker
+2026-03-16 17:22:20,434 INFO [websocket] Websocket connected
+2026-03-16 17:22:20,435 INFO [trading_bot.services.binance_ws] Binance spot WebSocket connected for BTC/USDT

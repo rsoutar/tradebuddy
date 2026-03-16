@@ -3,6 +3,7 @@ import { Icon } from '@iconify/react'
 import { Link } from '@tanstack/react-router'
 import { getViewerSubtitle, protectedConnectionItems, protectedNavigationItems, protectedSystemItems, type ProtectedNavId } from '../lib/protected-route'
 import { logoutViewer, type LineUserProfile } from '../lib/session'
+import { useTheme } from '../lib/theme'
 
 type ProtectedShellProps = {
   activeNavId: ProtectedNavId
@@ -78,10 +79,12 @@ export function ProtectedShell({
   header,
   viewer,
 }: ProtectedShellProps) {
+  const { effectiveTheme } = useTheme()
   const [isLoggingOut, setIsLoggingOut] = useState(false)
   const [isMenuOpen, setIsMenuOpen] = useState(false)
   const [isProfileMenuOpen, setIsProfileMenuOpen] = useState(false)
   const viewerSubtitle = getViewerSubtitle(viewer)
+  const isLightTheme = effectiveTheme === 'light'
 
   async function handleLogout() {
     try {
@@ -95,13 +98,25 @@ export function ProtectedShell({
 
   return (
     <div
-      className="flex h-screen overflow-hidden bg-zinc-950 font-sans text-zinc-300 antialiased selection:bg-zinc-800 selection:text-zinc-100"
-      style={{ backgroundImage: 'radial-gradient(circle at 50% 0%, #18181b 0%, #09090b 100%)' }}
+      className={cx(
+        'flex h-screen overflow-hidden font-sans antialiased',
+        isLightTheme
+          ? 'bg-zinc-50 text-zinc-700 selection:bg-zinc-200 selection:text-zinc-950'
+          : 'bg-zinc-950 text-zinc-300 selection:bg-zinc-800 selection:text-zinc-100',
+      )}
+      style={{
+        backgroundImage: isLightTheme
+          ? 'radial-gradient(circle at 50% 0%, #ffffff 0%, #f5f5f4 56%, #e7e5e4 100%)'
+          : 'radial-gradient(circle at 50% 0%, #18181b 0%, #09090b 100%)',
+      }}
     >
       {isMenuOpen ? (
         <button
           aria-label="Close navigation"
-          className="fixed inset-0 z-20 bg-black/50 md:hidden"
+          className={cx(
+            'fixed inset-0 z-20 md:hidden',
+            isLightTheme ? 'bg-stone-950/10 backdrop-blur-[2px]' : 'bg-black/50',
+          )}
           type="button"
           onClick={() => setIsMenuOpen(false)}
         />

@@ -38,6 +38,17 @@ def test_grid_strategy_generates_orders_on_both_sides():
     assert any(order.side.value == "sell" for order in evaluation.orders)
 
 
+def test_grid_config_uses_spacing_pct_to_build_levels():
+    config = GridBotConfig(
+        lower_price=100.0,
+        upper_price=130.0,
+        grid_count=5,
+        spacing_pct=10.0,
+    )
+
+    assert config.price_levels() == [100.0, 110.0, 121.0, 130.0]
+
+
 def test_grid_strategy_skips_stop_loss_warning_when_disabled():
     strategy = GridStrategy(
         GridBotConfig(

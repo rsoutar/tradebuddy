@@ -73,13 +73,11 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
   const effectiveTheme: 'light' | 'dark' =
     settings.theme === 'system' ? getSystemTheme() : settings.theme
 
-  // Apply theme class to document
+  // Keep native controls aligned with the current theme without overriding route-specific body classes.
   useEffect(() => {
     if (!mounted) return
 
-    const body = document.body
-    body.classList.remove('dark-dashboard-body', 'light-dashboard-body')
-    body.classList.add(`${effectiveTheme}-dashboard-body`)
+    document.documentElement.style.colorScheme = effectiveTheme
   }, [effectiveTheme, mounted])
 
   // Listen for system theme changes

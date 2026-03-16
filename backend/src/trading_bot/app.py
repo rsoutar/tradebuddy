@@ -382,14 +382,19 @@ class TradingBotApp:
     ) -> dict[str, Any]:
         config = bot_row["config"]
         if bot_row["strategy"] == StrategyType.GRID.value:
+            grid_config = self._grid_config_from_payload(config)
+            level_count = len(grid_config.price_levels()) if grid_config is not None else int(config["grid_count"])
             stop_loss_summary = (
                 f" • stop loss {config['stop_loss_pct']:.1f}%"
                 if config.get("stop_loss_enabled") and config.get("stop_loss_pct") is not None
                 else " • stop loss off"
             )
+            upper_stop_summary = (
+                " • stop at upper on" if config.get("stop_at_upper_enabled") else " • stop at upper off"
+            )
             config_summary = (
                 f"Range ${config['lower_price']:,.0f} to ${config['upper_price']:,.0f} "
-                f"across {config['grid_count']} levels{stop_loss_summary}"
+                f"across {level_count} levels{stop_loss_summary}{upper_stop_summary}"
             )
             pnl_modifier = 0.18
         elif bot_row["strategy"] == StrategyType.REBALANCE.value:
@@ -431,6 +436,7 @@ class TradingBotApp:
             upper_price=float(config_payload["upper_price"]),
             grid_count=int(config_payload["grid_count"]),
             spacing_pct=float(config_payload["spacing_pct"]),
+            stop_at_upper_enabled=bool(config_payload.get("stop_at_upper_enabled", False)),
             stop_loss_enabled=bool(config_payload.get("stop_loss_enabled", False)),
             stop_loss_pct=(
                 float(config_payload["stop_loss_pct"])
@@ -597,7 +603,7 @@ class TradingBotApp:
                 completed_at=datetime.fromisoformat(completed_at),
             )
             last_backtest = backtest.to_summary()
-            tone = "warning" if backtest.stop_loss_triggered else "neutral"
+            tone = "warning" if backtest.stop_loss_triggered or backtest.upper_price_stop_triggered else "neutral"
         else:
             balances = self._paper_balances(account_state)
             evaluation_data = self._evaluate_strategy(strategy_type, snapshot, balances)

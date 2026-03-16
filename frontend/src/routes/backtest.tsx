@@ -1,9 +1,11 @@
 import { Icon } from '@iconify/react'
 import { createFileRoute } from '@tanstack/react-router'
-import { useMemo, useState, type FormEvent } from 'react'
+import { lazy, Suspense, useMemo, useState, type FormEvent } from 'react'
+import type { BacktestEquityPoint } from '../components/backtest-equity-chart'
 import { ProtectedMenuButton, ProtectedShell } from '../components/protected-shell'
 import { requireAuthenticatedViewer } from '../lib/protected-route'
 import { getDashboard, runBacktest, type BacktestSummary, type DashboardState } from '../lib/session'
+import { useTheme } from '../lib/theme'
 import { Route as RootRoute } from './__root'
 
 const currencyFormatter = new Intl.NumberFormat('en-US', {
@@ -26,6 +28,11 @@ const dateTimeFormatter = new Intl.DateTimeFormat('en-US', {
   minute: '2-digit',
 })
 
+const chartDateFormatter = new Intl.DateTimeFormat('en-US', {
+  month: 'short',
+  day: 'numeric',
+})
+
 export const Route = createFileRoute('/backtest')({
   beforeLoad: async () => {
     await requireAuthenticatedViewer()
@@ -43,6 +50,12 @@ function cx(...classes: Array<string | false | null | undefined>) {
 
 function formatCurrency(value?: number) {
   return currencyFormatter.format(value ?? 0)
+}
+
+function formatSignedCurrency(value?: number) {
+  const safe = value ?? 0
+  const sign = safe > 0 ? '+' : safe < 0 ? '-' : ''
+  return `${sign}${currencyFormatter.format(Math.abs(safe))}`
 }
 
 function formatPercent(value?: number, digits = 2) {
@@ -64,6 +77,11 @@ function toDateInputValue(value: Date) {
   return value.toISOString().slice(0, 10)
 }
 
+const BacktestEquityChart = lazy(async () => {
+  const module = await import('../components/backtest-equity-chart')
+  return { default: module.BacktestEquityChart }
+})
+
 function defaultBacktestWindow() {
   const end = new Date()
   const start = new Date(end)
@@ -72,6 +90,52 @@ function defaultBacktestWindow() {
     start: toDateInputValue(start),
     end: toDateInputValue(end),
   }
+}
+
+function buildGridPreviewLevels(
+  lowerPrice: number,
+  upperPrice: number,
+  gridCount: number,
+  spacingPct: number,
+) {
+  if (
+    !Number.isFinite(lowerPrice) ||
+    !Number.isFinite(upperPrice) ||
+    !Number.isInteger(gridCount) ||
+    gridCount < 2 ||
+    !Number.isFinite(spacingPct) ||
+    spacingPct <= 0 ||
+    upperPrice <= lowerPrice
+  ) {
+    return []
+  }
+
+  const factor = 1 + spacingPct / 100
+  const levels = [Number(lowerPrice.toFixed(2))]
+  let currentLevel = lowerPrice
+
+  for (let index = 1; index < gridCount; index += 1) {
+    const nextLevel = currentLevel * factor
+    const lastLevel = levels[levels.length - 1]
+
+    if (nextLevel >= upperPrice) {
+      const roundedUpper = Number(upperPrice.toFixed(2))
+      if (roundedUpper > lastLevel) {
+        levels.push(roundedUpper)
+      }
+      break
+    }
+
+    const roundedLevel = Number(nextLevel.toFixed(2))
+    if (roundedLevel <= lastLevel) {
+      break
+    }
+
+    levels.push(roundedLevel)
+    currentLevel = nextLevel
+  }
+
+  return levels
 }
 
 function MetricCard({
@@ -113,6 +177,7 @@ function MetricCard({
 function BacktestPage() {
   const viewer = RootRoute.useLoaderData()
   const loaderData = Route.useLoaderData()
+  const { effectiveTheme } = useTheme()
   const [dashboard, setDashboard] = useState<DashboardState>(loaderData.dashboard)
   const initialWindow = defaultBacktestWindow()
   const [startDate, setStartDate] = useState(initialWindow.start)
@@ -124,6 +189,7 @@ function BacktestPage() {
   const [upperPrice, setUpperPrice] = useState('112000')
   const [gridCount, setGridCount] = useState('6')
   const [spacingPct, setSpacingPct] = useState('2')
+  const [stopAtUpperEnabled, setStopAtUpperEnabled] = useState(false)
   const [stopLossEnabled, setStopLossEnabled] = useState(false)
   const [stopLossPct, setStopLossPct] = useState('8')
   const [isRunning, setIsRunning] = useState(false)
@@ -133,36 +199,32 @@ function BacktestPage() {
   const backtest = dashboard.lastBacktest
   const tradeLog = backtest?.tradeLog ?? []
 
-  const cumulativeSeries = useMemo(() => {
+  const equityChartData = useMemo<BacktestEquityPoint[]>(() => {
     if (!backtest?.startEquityUsd) return []
-    let running = backtest.startEquityUsd
-    const points = tradeLog.map((trade, index) => {
-      running += trade.realized_pnl_usd ?? 0
-      return {
-        x: index,
-        y: running,
-      }
-    })
-    if (!points.length) {
-      return [{ x: 0, y: backtest.startEquityUsd }]
-    }
-    return [{ x: -1, y: backtest.startEquityUsd }, ...points]
-  }, [backtest?.startEquityUsd, tradeLog])
 
-  const sparklinePath = useMemo(() => {
-    if (!cumulativeSeries.length) return ''
-    const values = cumulativeSeries.map((point) => point.y)
-    const min = Math.min(...values)
-    const max = Math.max(...values)
-    const spread = max - min || 1
-    return cumulativeSeries
-      .map((point, index) => {
-        const x = (index / Math.max(cumulativeSeries.length - 1, 1)) * 100
-        const y = 100 - (((point.y - min) / spread) * 80 + 10)
-        return `${index === 0 ? 'M' : 'L'} ${x} ${y}`
+    let running = backtest.startEquityUsd
+    const startTimestamp = backtest.startedAt ?? tradeLog[0]?.timestamp ?? backtest.completedAt
+    const points: BacktestEquityPoint[] = [
+      {
+        label: 'Start',
+        timestamp: startTimestamp,
+        equity: running,
+      },
+    ]
+
+    tradeLog.forEach((trade, index) => {
+      running += trade.realized_pnl_usd ?? 0
+      points.push({
+        label: chartDateFormatter.format(new Date(trade.timestamp)),
+        timestamp: trade.timestamp,
+        equity: running,
+        realizedPnl: trade.realized_pnl_usd ?? null,
+        side: trade.side,
       })
-      .join(' ')
-  }, [cumulativeSeries])
+    })
+
+    return points
+  }, [backtest?.completedAt, backtest?.startEquityUsd, backtest?.startedAt, tradeLog])
 
   async function handleRefresh() {
     try {
@@ -244,6 +306,7 @@ function BacktestPage() {
             upperPrice: parsedUpperPrice,
             gridCount: parsedGridCount,
             spacingPct: parsedSpacingPct,
+            stopAtUpperEnabled,
             stopLossEnabled,
             stopLossPct: parsedStopLossPct,
           },
@@ -260,6 +323,20 @@ function BacktestPage() {
 
   const resultAccent =
     (backtest?.roiPct ?? 0) > 0 ? 'positive' : (backtest?.roiPct ?? 0) < 0 ? 'negative' : 'neutral'
+  const isLightTheme = effectiveTheme === 'light'
+  const gainLossUsd = (backtest?.finalEquityUsd ?? 0) - (backtest?.startEquityUsd ?? 0)
+  const parsedCapitalUsd = Number.parseFloat(capitalUsd)
+  const parsedLowerPrice = Number.parseFloat(lowerPrice)
+  const parsedUpperPrice = Number.parseFloat(upperPrice)
+  const parsedGridCount = Number.parseInt(gridCount, 10)
+  const parsedSpacingPct = Number.parseFloat(spacingPct)
+  const previewLevels = useMemo(
+    () => buildGridPreviewLevels(parsedLowerPrice, parsedUpperPrice, parsedGridCount, parsedSpacingPct),
+    [parsedGridCount, parsedLowerPrice, parsedSpacingPct, parsedUpperPrice],
+  )
+  const deployableCapitalUsd = Number.isFinite(parsedCapitalUsd) && parsedCapitalUsd > 0 ? parsedCapitalUsd * 0.9 : 0
+  const estimatedLevelBudgetUsd =
+    deployableCapitalUsd > 0 && previewLevels.length > 1 ? deployableCapitalUsd / (previewLevels.length - 1) : 0
 
   return (
     <ProtectedShell
@@ -289,19 +366,50 @@ function BacktestPage() {
       contentClassName="space-y-6"
     >
       <section className="grid gap-6 xl:grid-cols-[1.15fr_0.85fr]">
-        <div className="overflow-hidden rounded-[28px] border border-amber-400/20 bg-[linear-gradient(135deg,rgba(245,158,11,0.16),rgba(217,119,6,0.04)_45%,rgba(9,9,11,0.9)_80%)] p-7 shadow-[0_30px_80px_rgba(0,0,0,0.35)]">
+        <div
+          className={cx(
+            'overflow-hidden rounded-[28px] border p-7',
+            isLightTheme
+              ? 'border-amber-300/40 shadow-[0_24px_60px_rgba(180,83,9,0.10)]'
+              : 'border-amber-400/20 shadow-[0_30px_80px_rgba(0,0,0,0.35)]',
+          )}
+          style={{
+            backgroundImage: isLightTheme
+              ? 'linear-gradient(135deg, rgba(251, 191, 36, 0.18), rgba(255, 251, 235, 0.96) 42%, rgba(245, 245, 244, 0.98) 100%)'
+              : 'linear-gradient(135deg, rgba(245, 158, 11, 0.16), rgba(217, 119, 6, 0.04) 45%, rgba(9, 9, 11, 0.9) 80%)',
+          }}
+        >
           <div className="flex flex-wrap items-center gap-2">
-            <span className="rounded-full border border-amber-300/25 bg-amber-400/10 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.24em] text-amber-200">
+            <span
+              className={cx(
+                'rounded-full px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.24em]',
+                isLightTheme
+                  ? 'border border-amber-500/30 bg-amber-100/90 text-amber-900'
+                  : 'border border-amber-300/25 bg-amber-400/10 text-amber-200',
+              )}
+            >
               Historical Replay
             </span>
-            <span className="rounded-full border border-zinc-700 bg-zinc-950/50 px-3 py-1 text-[11px] uppercase tracking-[0.24em] text-zinc-400">
+            <span
+              className={cx(
+                'rounded-full px-3 py-1 text-[11px] uppercase tracking-[0.24em]',
+                isLightTheme
+                  ? 'border border-stone-300 bg-white/80 text-stone-600'
+                  : 'border border-zinc-700 bg-zinc-950/50 text-zinc-400',
+              )}
+            >
               Grid strategy live
             </span>
           </div>
-          <h2 className="mt-4 max-w-2xl text-4xl font-semibold tracking-tight text-zinc-50">
+          <h2
+            className={cx(
+              'mt-4 max-w-2xl text-4xl font-semibold tracking-tight',
+              isLightTheme ? 'text-stone-950' : 'text-zinc-50',
+            )}
+          >
             Tune the grid, replay the regime, and inspect whether the ladder still earns its keep.
           </h2>
-          <p className="mt-4 max-w-2xl text-sm leading-7 text-zinc-300/80">
+          <p className={cx('mt-4 max-w-2xl text-sm leading-7', isLightTheme ? 'text-stone-600' : 'text-zinc-300/80')}>
             This page is wired directly to the backend backtest runner. The form sends your grid
             range, capital, fees, slippage, and stop-loss assumptions to the API and stores the
             latest result in the dashboard state.
@@ -346,12 +454,6 @@ function BacktestPage() {
 
           <form className="mt-6 space-y-5" onSubmit={handleSubmit}>
             <div className="grid gap-4 sm:grid-cols-2">
-              <Field label="Start date">
-                <input type="date" value={startDate} onChange={(event) => setStartDate(event.target.value)} />
-              </Field>
-              <Field label="End date">
-                <input type="date" value={endDate} onChange={(event) => setEndDate(event.target.value)} />
-              </Field>
               <Field label="Initial capital (USD)">
                 <input
                   inputMode="decimal"
@@ -359,6 +461,12 @@ function BacktestPage() {
                   onChange={(event) => setCapitalUsd(event.target.value)}
                   placeholder="250"
                 />
+              </Field>
+              <Field label="Start date">
+                <input type="date" value={startDate} onChange={(event) => setStartDate(event.target.value)} />
+              </Field>
+              <Field label="End date">
+                <input type="date" value={endDate} onChange={(event) => setEndDate(event.target.value)} />
               </Field>
               <Field label="Grid count">
                 <input
@@ -411,12 +519,30 @@ function BacktestPage() {
               <div className="rounded-2xl border border-zinc-800/80 bg-zinc-900/70 p-4">
                 <label className="flex items-start justify-between gap-3">
                   <div>
+                    <p className="text-sm font-medium text-zinc-100">Stop when upper price is hit</p>
+                    <p className="mt-1 text-xs leading-5 text-zinc-500">
+                      End the backtest as soon as price touches the configured upper range.
+                    </p>
+                  </div>
+                  <input
+                    aria-label="Stop when upper price is hit"
+                    checked={stopAtUpperEnabled}
+                    className="mt-1 h-4 w-4 rounded border-zinc-700 bg-zinc-950 text-amber-400 focus:ring-amber-400"
+                    type="checkbox"
+                    onChange={(event) => setStopAtUpperEnabled(event.target.checked)}
+                  />
+                </label>
+              </div>
+              <div className="rounded-2xl border border-zinc-800/80 bg-zinc-900/70 p-4">
+                <label className="flex items-start justify-between gap-3">
+                  <div>
                     <p className="text-sm font-medium text-zinc-100">Stop-loss protection</p>
                     <p className="mt-1 text-xs leading-5 text-zinc-500">
                       Liquidate remaining BTC if price breaches the configured threshold.
                     </p>
                   </div>
                   <input
+                    aria-label="Enable stop-loss protection"
                     checked={stopLossEnabled}
                     className="mt-1 h-4 w-4 rounded border-zinc-700 bg-zinc-950 text-amber-400 focus:ring-amber-400"
                     type="checkbox"
@@ -435,6 +561,34 @@ function BacktestPage() {
                   </Field>
                 </div>
               </div>
+            </div>
+
+            <div
+              className={cx(
+                'grid gap-3 rounded-[24px] border p-4 sm:grid-cols-3',
+                isLightTheme
+                  ? 'border-amber-300/40 bg-white/80'
+                  : 'border-zinc-800/80 bg-zinc-900/65',
+              )}
+            >
+              <DerivedMetric
+                label="Working Capital"
+                value={deployableCapitalUsd > 0 ? formatCurrency(deployableCapitalUsd) : '--'}
+                detail="Backtests deploy 90% of your capital into the grid ladder."
+                isLightTheme={isLightTheme}
+              />
+              <DerivedMetric
+                label="Levels In Range"
+                value={previewLevels.length ? numberFormatter.format(previewLevels.length) : '--'}
+                detail="Spacing, range, and grid count determine how many levels actually fit."
+                isLightTheme={isLightTheme}
+              />
+              <DerivedMetric
+                label="Est. Budget Per Level"
+                value={estimatedLevelBudgetUsd > 0 ? formatCurrency(estimatedLevelBudgetUsd) : '--'}
+                detail="Approximate capital allocated to each tradable gap between levels."
+                isLightTheme={isLightTheme}
+              />
             </div>
 
             {formError ? (
@@ -486,7 +640,17 @@ function BacktestPage() {
 
           {backtest ? (
             <>
-              <div className="mt-6 rounded-[24px] border border-zinc-800/80 bg-[radial-gradient(circle_at_top,rgba(245,158,11,0.12),transparent_55%),linear-gradient(180deg,rgba(24,24,27,0.95),rgba(9,9,11,0.98))] p-5">
+              <div
+                className={cx(
+                  'mt-6 rounded-[24px] border p-5',
+                  isLightTheme ? 'border-amber-200/80' : 'border-zinc-800/80',
+                )}
+                style={{
+                  backgroundImage: isLightTheme
+                    ? 'radial-gradient(circle at top, rgba(251, 191, 36, 0.16), transparent 58%), linear-gradient(180deg, rgba(255, 251, 235, 0.98), rgba(250, 250, 249, 0.96))'
+                    : 'radial-gradient(circle at top, rgba(245, 158, 11, 0.12), transparent 55%), linear-gradient(180deg, rgba(24, 24, 27, 0.95), rgba(9, 9, 11, 0.98))',
+                }}
+              >
                 <div className="flex flex-wrap items-center justify-between gap-3">
                   <div>
                     <p className="text-sm text-zinc-400">Capital evolution</p>
@@ -501,24 +665,15 @@ function BacktestPage() {
                 </div>
 
                 <div className="mt-6 overflow-hidden rounded-2xl border border-zinc-800/70 bg-zinc-950/70 p-4">
-                  <svg className="h-48 w-full" preserveAspectRatio="none" viewBox="0 0 100 100">
-                    <defs>
-                      <linearGradient id="backtestLine" x1="0%" x2="100%" y1="0%" y2="0%">
-                        <stop offset="0%" stopColor="#f59e0b" />
-                        <stop offset="100%" stopColor="#fbbf24" />
-                      </linearGradient>
-                    </defs>
-                    <path d="M 0 90 L 100 90" fill="none" stroke="rgba(63,63,70,0.8)" strokeDasharray="3 4" />
-                    {sparklinePath ? (
-                      <path
-                        d={sparklinePath}
-                        fill="none"
-                        stroke="url(#backtestLine)"
-                        strokeLinecap="round"
-                        strokeWidth="2.5"
-                      />
-                    ) : null}
-                  </svg>
+                  <Suspense
+                    fallback={
+                      <div className="flex h-48 items-center justify-center text-sm text-zinc-500">
+                        Loading chart...
+                      </div>
+                    }
+                  >
+                    <BacktestEquityChart data={equityChartData} isLightTheme={isLightTheme} />
+                  </Suspense>
                 </div>
               </div>
 
@@ -536,10 +691,10 @@ function BacktestPage() {
                   icon="solar:medal-ribbon-star-linear"
                 />
                 <MetricCard
-                  label="Annualized"
-                  value={formatPercent(backtest.annualizedPct)}
-                  accent={(backtest.annualizedPct ?? 0) >= 0 ? 'positive' : 'negative'}
-                  detail="Simple annualization of the replay result."
+                  label="Gain / Loss"
+                  value={formatSignedCurrency(gainLossUsd)}
+                  accent={gainLossUsd >= 0 ? 'positive' : 'negative'}
+                  detail={`${formatCurrency(backtest.startEquityUsd)} to ${formatCurrency(backtest.finalEquityUsd)} (${formatPercent(backtest.roiPct)})`}
                   icon="solar:chart-2-linear"
                 />
                 <MetricCard
@@ -572,7 +727,9 @@ function BacktestPage() {
               <AssumptionRow label="Slippage rate" value={formatNumber(backtest?.slippageRate ?? Number(slippageRate), 4)} />
               <AssumptionRow label="Range" value={`${numberFormatter.format(Number(lowerPrice))} - ${numberFormatter.format(Number(upperPrice))}`} />
               <AssumptionRow label="Grid count" value={gridCount} />
+              <AssumptionRow label="Levels in range" value={previewLevels.length ? String(previewLevels.length) : '--'} />
               <AssumptionRow label="Spacing" value={`${spacingPct}%`} />
+              <AssumptionRow label="Upper stop" value={stopAtUpperEnabled ? 'Enabled' : backtest?.upperPriceStopTriggered ? 'Triggered' : 'Disabled'} />
               <AssumptionRow label="Stop-loss" value={stopLossEnabled ? `${stopLossPct}%` : backtest?.stopLossTriggered ? 'Triggered' : 'Disabled'} />
             </div>
           </div>
@@ -639,10 +796,10 @@ function BacktestPage() {
                     <td className="px-4 py-3">
                       <span
                         className={cx(
-                          'inline-flex rounded-full px-3 py-1 text-xs font-semibold uppercase tracking-[0.16em]',
+                          'inline-flex rounded-full border px-3 py-1 text-xs font-semibold uppercase tracking-[0.16em]',
                           trade.side === 'buy'
-                            ? 'bg-emerald-500/12 text-emerald-300'
-                            : 'bg-amber-500/12 text-amber-200',
+                            ? 'border-emerald-400/35 bg-emerald-500/18 text-emerald-600'
+                            : 'border-rose-400/35 bg-rose-500/14 text-rose-500',
                         )}
                       >
                         {trade.side}
@@ -689,12 +846,22 @@ function Field({
   children: React.ReactNode
   label: string
 }) {
+  const { effectiveTheme } = useTheme()
+  const isLightTheme = effectiveTheme === 'light'
+
   return (
     <label className="block">
       <span className="mb-2 block text-xs font-medium uppercase tracking-[0.18em] text-zinc-500">
         {label}
       </span>
-      <div className="rounded-2xl border border-zinc-800/80 bg-zinc-900/70 px-4 py-3 text-sm text-zinc-100 [&_input]:w-full [&_input]:border-none [&_input]:bg-transparent [&_input]:text-sm [&_input]:text-zinc-100 [&_input]:outline-none [&_input]:placeholder:text-zinc-600 [&_input:disabled]:cursor-not-allowed [&_input:disabled]:text-zinc-600">
+      <div
+        className={cx(
+          'rounded-2xl border px-4 py-3 text-sm [&_input]:w-full [&_input]:border-none [&_input]:bg-transparent [&_input]:text-sm [&_input]:outline-none [&_input:disabled]:cursor-not-allowed',
+          isLightTheme
+            ? 'border-stone-300/80 bg-stone-50/90 text-stone-900 [&_input]:text-stone-900 [&_input]:placeholder:text-stone-400 [&_input:disabled]:text-stone-400'
+            : 'border-zinc-800/80 bg-zinc-900/70 text-zinc-100 [&_input]:text-zinc-100 [&_input]:placeholder:text-zinc-600 [&_input:disabled]:text-zinc-600',
+        )}
+      >
         {children}
       </div>
     </label>
@@ -706,6 +873,35 @@ function AssumptionRow({ label, value }: { label: string; value: string }) {
     <div className="flex items-center justify-between gap-4 rounded-2xl border border-zinc-800/80 bg-zinc-900/60 px-4 py-3">
       <span className="text-sm text-zinc-400">{label}</span>
       <strong className="text-sm font-medium text-zinc-100">{value}</strong>
+    </div>
+  )
+}
+
+function DerivedMetric({
+  label,
+  value,
+  detail,
+  isLightTheme,
+}: {
+  label: string
+  value: string
+  detail: string
+  isLightTheme: boolean
+}) {
+  return (
+    <div
+      className={cx(
+        'rounded-2xl border px-4 py-4',
+        isLightTheme ? 'border-stone-200/80 bg-stone-50/85' : 'border-zinc-800/70 bg-zinc-950/60',
+      )}
+    >
+      <p className={cx('text-[11px] uppercase tracking-[0.2em]', isLightTheme ? 'text-stone-500' : 'text-zinc-500')}>
+        {label}
+      </p>
+      <p className={cx('mt-2 text-2xl font-semibold tracking-tight', isLightTheme ? 'text-stone-950' : 'text-zinc-50')}>
+        {value}
+      </p>
+      <p className={cx('mt-2 text-xs leading-5', isLightTheme ? 'text-stone-500' : 'text-zinc-500')}>{detail}</p>
     </div>
   )
 }

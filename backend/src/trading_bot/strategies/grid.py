@@ -18,11 +18,9 @@ class GridStrategy(Strategy):
         self._config = config
 
     def evaluate(self, snapshot: MarketSnapshot, balances: list) -> StrategyEvaluation:
+        levels = self._config.price_levels()
         lower = self._config.lower_price
         upper = self._config.upper_price
-        step = (upper - lower) / (self._config.grid_count - 1)
-        levels = [lower + (step * index) for index in range(self._config.grid_count)]
-
         current_price = snapshot.price
         btc_free = free_balance(balances, "BTC")
         usdt_free = free_balance(balances, "USDT")
@@ -74,8 +72,12 @@ class GridStrategy(Strategy):
 
         return StrategyEvaluation(
             strategy=StrategyType.GRID,
-            summary=f"Generated {len(orders)} grid orders across {self._config.grid_count} levels.",
+            summary=f"Generated {len(orders)} grid orders across {len(levels)} levels.",
             orders=orders,
             warnings=warnings,
-            metrics={"grid_step": round(step, 2), "price": current_price},
+            metrics={
+                "grid_spacing_pct": self._config.spacing_pct,
+                "top_level": levels[-1],
+                "price": current_price,
+            },
         )
