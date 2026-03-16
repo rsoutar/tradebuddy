@@ -413,7 +413,10 @@ def test_create_bot_persists_active_strategy_and_trades(monkeypatch, tmp_path) -
 
     active_bot = payload["dashboard"]["activeStrategies"][0]
     assert active_bot["strategy"] == "grid"
-    assert active_bot["tradeCount"] > 0
+    assert active_bot["tradeCount"] == 0
+    assert active_bot["totalNotionalUsd"] == 0.0
+    assert active_bot["unrealizedPnlUsd"] == 0.0
+    assert active_bot["lastTradeAt"] is None
     assert "stop loss 9.5%" in active_bot["configSummary"]
 
     database_path = tmp_path / "state" / "paper_trading.sqlite3"
@@ -422,7 +425,7 @@ def test_create_bot_persists_active_strategy_and_trades(monkeypatch, tmp_path) -
         trade_count = connection.execute("SELECT COUNT(*) FROM paper_trades").fetchone()[0]
 
     assert bot_count == 1
-    assert trade_count == active_bot["tradeCount"]
+    assert trade_count > active_bot["tradeCount"]
 
 
 def test_create_rebalance_bot_persists_custom_config(monkeypatch, tmp_path) -> None:
@@ -449,7 +452,7 @@ def test_create_rebalance_bot_persists_custom_config(monkeypatch, tmp_path) -> N
 
     active_bot = payload["dashboard"]["activeStrategies"][0]
     assert active_bot["strategy"] == "rebalance"
-    assert active_bot["tradeCount"] > 0
+    assert active_bot["tradeCount"] == 0
     assert "Target BTC 60%" in active_bot["configSummary"]
     assert "3.5% drift threshold" in active_bot["configSummary"]
 
@@ -479,7 +482,9 @@ def test_create_infinity_grid_bot_persists_custom_config(monkeypatch, tmp_path) 
 
     active_bot = payload["dashboard"]["activeStrategies"][0]
     assert active_bot["strategy"] == "infinity-grid"
-    assert active_bot["tradeCount"] > 0
+    assert active_bot["tradeCount"] == 0
+    assert active_bot["totalNotionalUsd"] == 0.0
+    assert active_bot["unrealizedPnlUsd"] == 0.0
     assert "Reference $62,000" in active_bot["configSummary"]
     assert "5 levels per side" in active_bot["configSummary"]
     assert "$125 per order" in active_bot["configSummary"]
@@ -574,6 +579,8 @@ def test_bot_history_tracks_multiple_active_bots(monkeypatch, tmp_path) -> None:
     assert history_payload["summary"]["previousBotCount"] == 0
     assert history_payload["activeBots"][0]["name"].endswith("#02")
     assert history_payload["activeBots"][0]["status"] == "paper-running"
+    assert history_payload["activeBots"][0]["tradeCount"] == 0
+    assert history_payload["activeBots"][0]["unrealizedPnlUsd"] == 0.0
     assert history_payload["activeBots"][1]["name"].endswith("#01")
     assert history_payload["activeBots"][1]["status"] == "paper-running"
     assert history_payload["previousBots"] == []

@@ -381,6 +381,47 @@ class TradingBotApp:
             Balance(asset="USDT", free=account_state["usd_balance"], locked=0.0),
         ]
 
+    def _bot_position_metrics(
+        self,
+        bot_id: str,
+        snapshot: MarketSnapshot,
+    ) -> dict[str, Any]:
+        trades = self.paper_store.list_executed_bot_trades(bot_id=bot_id)
+        position_btc = 0.0
+        position_cost_usd = 0.0
+
+        for trade in trades:
+            amount = float(trade["amount"])
+            notional_usd = float(trade["notionalUsd"])
+
+            if trade["side"] == "buy":
+                position_btc += amount
+                position_cost_usd += notional_usd
+                continue
+
+            if position_btc <= 0:
+                position_btc = 0.0
+                position_cost_usd = 0.0
+                continue
+
+            sell_amount = min(amount, position_btc)
+            average_cost = position_cost_usd / position_btc if position_btc > 0 else 0.0
+            position_btc = max(position_btc - sell_amount, 0.0)
+            position_cost_usd = max(position_cost_usd - (average_cost * sell_amount), 0.0)
+
+        position_value_usd = round(position_btc * snapshot.price, 2)
+        unrealized_pnl_usd = round(position_value_usd - position_cost_usd, 2)
+        unrealized_pnl_pct = (
+            round((unrealized_pnl_usd / position_cost_usd) * 100, 2) if position_cost_usd > 0 else 0.0
+        )
+
+        return {
+            "positionValueUsd": position_value_usd,
+            "unrealizedPnlUsd": unrealized_pnl_usd,
+            "unrealizedPnlPct": unrealized_pnl_pct,
+            "lastTradeAt": trades[-1]["createdAt"] if trades else None,
+        }
+
     def _active_strategy_summary(
         self,
         bot_row: dict[str, Any],
@@ -416,15 +457,14 @@ class TradingBotApp:
                 f"${float(config.get('order_size_usd', 100.0)):,.0f} per order • "
                 f"{float(config['spacing_pct']):.1f}% spacing"
             )
-            pnl_modifier = 0.22
-
-        unrealized_pnl_pct = round(snapshot.change_24h_pct * pnl_modifier, 2)
-        unrealized_pnl_usd = round(bot_row["totalNotionalUsd"] * (unrealized_pnl_pct / 100), 2)
+        position_metrics = self._bot_position_metrics(bot_row["id"], snapshot)
         return {
             **bot_row,
             "configSummary": config_summary,
-            "unrealizedPnlUsd": unrealized_pnl_usd,
-            "unrealizedPnlPct": unrealized_pnl_pct,
+            "totalNotionalUsd": position_metrics["positionValueUsd"],
+            "unrealizedPnlUsd": position_metrics["unrealizedPnlUsd"],
+            "unrealizedPnlPct": position_metrics["unrealizedPnlPct"],
+            "lastTradeAt": position_metrics["lastTradeAt"],
         }
 
     def _bot_instance_summary(

@@ -53,12 +53,10 @@ class BotWorkerRunner:
                     config_override=config_override,
                 )
                 heartbeat_at = utc_timestamp()
-                last_trade_at = heartbeat_at if evaluation_data["evaluation"].orders else bot["lastTradeAt"]
                 self._app.paper_store.record_bot_heartbeat(
                     bot_id=self._bot_id,
                     pid=pid,
                     timestamp=heartbeat_at,
-                    last_trade_at=last_trade_at,
                 )
                 time.sleep(self._poll_interval_seconds)
         except Exception as exc:

@@ -426,7 +426,7 @@ class PaperTradingStore:
                     timestamp,
                     timestamp,
                     timestamp,
-                    timestamp if orders else None,
+                    None,
                 ),
             )
             bot_id = int(cursor.lastrowid)
@@ -604,7 +604,7 @@ class PaperTradingStore:
                     COALESCE(SUM(t.notional_usd), 0) AS total_notional_usd,
                     AVG(t.price) AS average_price
                 FROM bot_instances b
-                LEFT JOIN paper_trades t ON t.bot_id = b.id
+                LEFT JOIN paper_trades t ON t.bot_id = b.id AND t.status != 'planned'
                 WHERE b.user_id = ? AND b.status = 'paper-running'
                 GROUP BY
                     b.id,
@@ -683,7 +683,7 @@ class PaperTradingStore:
                     COALESCE(SUM(t.notional_usd), 0) AS total_notional_usd,
                     AVG(t.price) AS average_price
                 FROM bot_instances b
-                LEFT JOIN paper_trades t ON t.bot_id = b.id
+                LEFT JOIN paper_trades t ON t.bot_id = b.id AND t.status != 'planned'
                 WHERE b.user_id = ?
                 GROUP BY
                     b.id,
@@ -985,6 +985,35 @@ class PaperTradingStore:
                 "notionalUsd": round(float(row["notional_usd"]), 2),
                 "rationale": row["rationale"],
                 "status": row["status"],
+                "createdAt": row["created_at"],
+            }
+            for row in rows
+        ]
+
+    def list_executed_bot_trades(self, *, bot_id: str) -> list[dict[str, Any]]:
+        numeric_id = int(bot_id.replace("bot-", "", 1))
+        with self._connect() as connection:
+            rows = connection.execute(
+                """
+                SELECT
+                    side,
+                    amount,
+                    price,
+                    notional_usd,
+                    created_at
+                FROM paper_trades
+                WHERE bot_id = ? AND status != 'planned'
+                ORDER BY created_at ASC, id ASC
+                """,
+                (numeric_id,),
+            ).fetchall()
+
+        return [
+            {
+                "side": row["side"],
+                "amount": round(float(row["amount"]), 6),
+                "price": round(float(row["price"]), 2),
+                "notionalUsd": round(float(row["notional_usd"]), 2),
                 "createdAt": row["created_at"],
             }
             for row in rows

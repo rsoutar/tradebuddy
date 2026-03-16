@@ -1,3 +1,4 @@
+import { useId } from 'react'
 import { CartesianGrid, Line, LineChart, ReferenceLine, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts'
 
 function cx(...classes: Array<string | false | null | undefined>) {
@@ -99,10 +100,16 @@ function EquityTooltip({
 export function BacktestEquityChart({
   data,
   isLightTheme,
+  className,
 }: {
   data: BacktestEquityPoint[]
   isLightTheme: boolean
+  className?: string
 }) {
+  const chartId = useId().replace(/:/g, '')
+  const positiveLineId = `${chartId}-positive-line`
+  const positiveGlowId = `${chartId}-positive-glow`
+  const negativeGlowId = `${chartId}-negative-glow`
   const startingEquity = data[0]?.equity ?? 0
   const segmentedData = data.reduce<Array<BacktestEquityPoint & { positiveEquity: number | null; negativeEquity: number | null }>>(
     (points, point, index) => {
@@ -146,7 +153,7 @@ export function BacktestEquityChart({
   )
 
   return (
-    <div className="h-48 w-full">
+    <div className={cx('w-full', className ?? 'h-48')}>
       <ResponsiveContainer width="100%" height="100%">
         <LineChart
           accessibilityLayer
@@ -191,10 +198,10 @@ export function BacktestEquityChart({
           <Line
             dataKey="positiveEquity"
             type="linear"
-            stroke="url(#backtestPositiveLine)"
+            stroke={`url(#${positiveLineId})`}
             connectNulls={false}
             dot={false}
-            filter="url(#backtestPositiveGlow)"
+            filter={`url(#${positiveGlowId})`}
             isAnimationActive={false}
             strokeWidth={3}
           />
@@ -204,21 +211,21 @@ export function BacktestEquityChart({
             stroke="#dc2626"
             connectNulls={false}
             dot={false}
-            filter="url(#backtestNegativeGlow)"
+            filter={`url(#${negativeGlowId})`}
             isAnimationActive={false}
             strokeWidth={3}
           />
           <defs>
-            <linearGradient id="backtestPositiveLine" x1="0" y1="0" x2="1" y2="0">
+            <linearGradient id={positiveLineId} x1="0" y1="0" x2="1" y2="0">
               <stop offset="0%" stopColor="#86efac" stopOpacity={0.95} />
               <stop offset="45%" stopColor="#4ade80" stopOpacity={0.96} />
               <stop offset="100%" stopColor="#15803d" stopOpacity={0.98} />
             </linearGradient>
-            <filter id="backtestPositiveGlow" x="-20%" y="-20%" width="140%" height="140%">
+            <filter id={positiveGlowId} x="-20%" y="-20%" width="140%" height="140%">
               <feGaussianBlur result="blur" stdDeviation="8" />
               <feComposite in="SourceGraphic" in2="blur" operator="over" />
             </filter>
-            <filter id="backtestNegativeGlow" x="-20%" y="-20%" width="140%" height="140%">
+            <filter id={negativeGlowId} x="-20%" y="-20%" width="140%" height="140%">
               <feGaussianBlur result="blur" stdDeviation="8" />
               <feComposite in="SourceGraphic" in2="blur" operator="over" />
             </filter>

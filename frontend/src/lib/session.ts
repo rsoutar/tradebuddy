@@ -54,6 +54,7 @@ export type ActiveStrategy = {
   symbol: string
   exchange: string
   status: 'paper-running'
+  desiredStatus?: 'running' | 'stopped'
   tradeCount: number
   buyCount: number
   sellCount: number
@@ -62,6 +63,8 @@ export type ActiveStrategy = {
   unrealizedPnlPct: number
   configSummary: string
   createdAt: string
+  startedAt: string
+  updatedAt: string
   lastTradeAt?: string
 }
 
@@ -73,6 +76,7 @@ export type BotRun = {
   symbol: string
   exchange: string
   status: 'paper-running' | 'stopped' | 'crashed'
+  desiredStatus?: 'running' | 'stopped'
   tradeCount: number
   buyCount: number
   sellCount: number
@@ -730,6 +734,36 @@ export const createBot = createServerFn({ method: 'POST' }).handler(async ({ dat
   )
 
   return payload.dashboard
+})
+
+export const stopBot = createServerFn({ method: 'POST' }).handler(async ({ data }) => {
+  const input = (data ?? {}) as { botId?: string }
+  const session = await useSession<SessionData>(getSessionConfig())
+
+  if (!session.data.user) {
+    throw new Error('You need to sign in before stopping a bot.')
+  }
+
+  if (!input.botId) {
+    throw new Error('Choose a bot before requesting a stop.')
+  }
+
+  await fetchBackend<BackendDashboardEnvelope>(
+    new URL(`/api/bots/${input.botId}/stop`, getBackendApiBaseUrl()).toString(),
+    {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(getUserScope(session.data.user)),
+    },
+  )
+
+  const url = new URL('/api/bots/history', getBackendApiBaseUrl())
+  url.searchParams.set('user_id', session.data.user.userId)
+  url.searchParams.set('user_name', session.data.user.displayName)
+
+  return fetchBackend<BackendBotActivityEnvelope>(url.toString())
 })
 
 export const depositPaperFunds = createServerFn({ method: 'POST' }).handler(

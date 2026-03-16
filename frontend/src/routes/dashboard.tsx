@@ -2,11 +2,12 @@ import { useMemo, useState } from 'react'
 import type { FormEvent, ReactNode } from 'react'
 import { Link, createFileRoute } from '@tanstack/react-router'
 import { Icon } from '@iconify/react'
+import { BotControlModal } from '../components/bot-control-modal'
 import { MarketConnectionBadge } from '../components/market-connection-badge'
 import { ProtectedMenuButton, ProtectedShell } from '../components/protected-shell'
 import { requireAuthenticatedViewer } from '../lib/protected-route'
-import type { DashboardState, MarketConnectionState, MarketState, StrategyKey } from '../lib/session'
-import { createBot, depositPaperFunds, getDashboard } from '../lib/session'
+import type { ActiveStrategy, DashboardState, MarketConnectionState, MarketState, StrategyKey } from '../lib/session'
+import { createBot, depositPaperFunds, getDashboard, stopBot } from '../lib/session'
 
 const strategyLabels: Record<StrategyKey, string> = {
   grid: 'Grid Bot',
@@ -116,6 +117,213 @@ function formatTimeAgo(timestamp?: string) {
   if (diffDays < 7) return `${diffDays} day${diffDays > 1 ? 's' : ''} ago`
 
   return dateTimeFormatter.format(date)
+}
+
+function parsePositiveNumber(value: string) {
+  const parsed = Number.parseFloat(value)
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : undefined
+}
+
+function parsePositiveInteger(value: string) {
+  const parsed = Number.parseInt(value, 10)
+  return Number.isInteger(parsed) && parsed > 0 ? parsed : undefined
+}
+
+function roundPrice(value: number) {
+  return Math.round(value * 100) / 100
+}
+
+function buildGridLevels(lowerPrice: number, upperPrice: number, gridCount: number, spacingPct: number) {
+  const factor = 1 + spacingPct / 100
+  const levels = [roundPrice(lowerPrice)]
+  let currentLevel = lowerPrice
+
+  for (let index = 1; index < gridCount; index += 1) {
+    const nextLevel = currentLevel * factor
+    if (nextLevel >= upperPrice) {
+      const roundedUpper = roundPrice(upperPrice)
+      if (roundedUpper > levels[levels.length - 1]) {
+        levels.push(roundedUpper)
+      }
+      break
+    }
+
+    const roundedLevel = roundPrice(nextLevel)
+    if (roundedLevel <= levels[levels.length - 1]) {
+      break
+    }
+
+    levels.push(roundedLevel)
+    currentLevel = nextLevel
+  }
+
+  return levels
+}
+
+function infinityLevelAt(referencePrice: number, spacingPct: number, index: number) {
+  return roundPrice(referencePrice * (1 + spacingPct / 100) ** index)
+}
+
+function infinityIndexBelow(referencePrice: number, spacingPct: number, price: number) {
+  const factor = 1 + spacingPct / 100
+  let rawIndex = Math.floor(Math.log(price / referencePrice) / Math.log(factor))
+
+  while (infinityLevelAt(referencePrice, spacingPct, rawIndex) > price) {
+    rawIndex -= 1
+  }
+
+  while (infinityLevelAt(referencePrice, spacingPct, rawIndex + 1) <= price) {
+    rawIndex += 1
+  }
+
+  return rawIndex
+}
+
+type LadderPreviewLevel = {
+  id: string
+  price: number
+  kind: 'buy' | 'sell' | 'spot'
+  label: string
+}
+
+type LadderPreviewModel = {
+  title: string
+  subtitle: string
+  levels: LadderPreviewLevel[]
+  badges: string[]
+  notes: string[]
+}
+
+function LadderPreview({
+  model,
+}: {
+  model?: LadderPreviewModel
+}) {
+  if (!model) {
+    return (
+      <div className="rounded-[1.5rem] border border-dashed border-zinc-800 bg-zinc-950/70 p-5 text-sm text-zinc-500">
+        Enter valid parameters to preview the ladder before creating the bot.
+      </div>
+    )
+  }
+
+  const sortedLevels = [...model.levels].sort((left, right) => right.price - left.price)
+  const minPrice = Math.min(...sortedLevels.map((level) => level.price))
+  const maxPrice = Math.max(...sortedLevels.map((level) => level.price))
+  const span = Math.max(maxPrice - minPrice, maxPrice * 0.01, 1)
+  const chartHeight = Math.min(Math.max(sortedLevels.length * 17, 180), 260)
+  const topLevels = sortedLevels.slice(0, 8)
+
+  return (
+    <div className="rounded-[1.5rem] border border-zinc-800/80 bg-[radial-gradient(circle_at_top,_rgba(244,244,245,0.05),_transparent_55%),linear-gradient(180deg,rgba(24,24,27,0.96),rgba(9,9,11,0.96))] p-4">
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <p className="text-[11px] font-semibold uppercase tracking-[0.3em] text-zinc-500">
+            Live Preview
+          </p>
+          <h4 className="mt-2 text-base font-medium tracking-tight text-zinc-100">{model.title}</h4>
+          <p className="mt-1 max-w-2xl text-sm leading-6 text-zinc-400">{model.subtitle}</p>
+        </div>
+        <div className="rounded-full border border-zinc-700/80 bg-zinc-900/80 px-3 py-1 text-xs font-medium text-zinc-300">
+          {sortedLevels.length} plotted markers
+        </div>
+      </div>
+
+      <div className="mt-4 rounded-[1.2rem] border border-zinc-800/80 bg-zinc-950/80 p-3">
+        <div className="mb-3 flex items-center justify-between text-[11px] uppercase tracking-[0.24em] text-zinc-500">
+          <span>Higher price</span>
+          <span>{formatCurrency(maxPrice)}</span>
+        </div>
+        <div
+          className="relative overflow-hidden rounded-[1.1rem] border border-zinc-800/70 bg-[linear-gradient(180deg,rgba(39,39,42,0.55),rgba(9,9,11,0.92))]"
+          style={{ height: `${chartHeight}px` }}
+        >
+          <div className="absolute inset-y-4 left-5 w-px bg-zinc-700/80" />
+          {sortedLevels.map((level) => {
+            const top = ((maxPrice - level.price) / span) * 100
+            const toneClasses =
+              level.kind === 'buy'
+                ? 'border-emerald-400/40 bg-emerald-400/10 text-emerald-200'
+                : level.kind === 'sell'
+                  ? 'border-rose-400/40 bg-rose-400/10 text-rose-200'
+                  : 'border-amber-300/50 bg-amber-300/12 text-amber-100'
+            const railClasses =
+              level.kind === 'buy'
+                ? 'border-emerald-400/35'
+                : level.kind === 'sell'
+                  ? 'border-rose-400/35'
+                  : 'border-amber-300/45'
+            const dotClasses =
+              level.kind === 'buy'
+                ? 'bg-emerald-300 shadow-[0_0_16px_rgba(52,211,153,0.35)]'
+                : level.kind === 'sell'
+                  ? 'bg-rose-300 shadow-[0_0_16px_rgba(251,113,133,0.35)]'
+                  : 'bg-amber-200 shadow-[0_0_18px_rgba(252,211,77,0.45)]'
+
+            return (
+              <div key={level.id} className="absolute inset-x-0" style={{ top: `${top}%` }}>
+                <div className="absolute left-4 h-2 w-2 -translate-y-1/2 rounded-full ring-4 ring-zinc-950/80" />
+                <div className={cx('absolute left-4 h-2 w-2 -translate-y-1/2 rounded-full', dotClasses)} />
+                <div className={cx('absolute left-7 right-3 border-t -translate-y-1/2 border-dashed', railClasses)} />
+                {level.kind === 'spot' ? (
+                  <div className="absolute left-10 top-1/2 -translate-y-1/2 rounded-full border border-amber-300/40 bg-zinc-950/90 px-2 py-0.5 text-[10px] font-medium uppercase tracking-[0.18em] text-amber-100">
+                    Spot
+                  </div>
+                ) : null}
+              </div>
+            )
+          })}
+        </div>
+        <div className="mt-3 flex items-center justify-between text-[11px] uppercase tracking-[0.24em] text-zinc-500">
+          <span>Lower price</span>
+          <span>{formatCurrency(minPrice)}</span>
+        </div>
+      </div>
+
+      <div className="mt-3 grid gap-2 sm:grid-cols-2">
+        {topLevels.map((level) => {
+          const toneClasses =
+            level.kind === 'buy'
+              ? 'border-emerald-400/30 bg-emerald-400/8 text-emerald-200'
+              : level.kind === 'sell'
+                ? 'border-rose-400/30 bg-rose-400/8 text-rose-200'
+                : 'border-amber-300/30 bg-amber-300/8 text-amber-100'
+
+          return (
+            <div
+              key={`${level.id}-legend`}
+              className={cx(
+                'flex items-center justify-between rounded-xl border px-3 py-2 text-xs shadow-sm shadow-black/10',
+                toneClasses,
+              )}
+            >
+              <span className="font-medium">{level.label}</span>
+              <span className="tabular-nums text-current/80">{formatCurrency(level.price)}</span>
+            </div>
+          )
+        })}
+      </div>
+
+      <div className="mt-4 flex flex-wrap gap-2">
+        {model.badges.map((badge) => (
+          <span
+            key={badge}
+            className="rounded-full border border-zinc-700/70 bg-zinc-900/80 px-3 py-1 text-xs font-medium text-zinc-300"
+          >
+            {badge}
+          </span>
+        ))}
+      </div>
+
+      <div className="mt-4 space-y-2">
+        {model.notes.slice(0, 2).map((note) => (
+          <p key={note} className="text-sm leading-6 text-zinc-400">
+            {note}
+          </p>
+        ))}
+      </div>
+    </div>
+  )
 }
 
 function toneClasses(tone: 'blue' | 'purple' | 'zinc') {
@@ -249,6 +457,10 @@ function DashboardPage() {
   const [isDepositing, setIsDepositing] = useState(false)
   const [actionError, setActionError] = useState<string>()
   const [searchValue, setSearchValue] = useState('')
+  const [selectedActiveBotId, setSelectedActiveBotId] = useState<string>()
+  const [isStoppingBot, setIsStoppingBot] = useState(false)
+  const [botControlFeedback, setBotControlFeedback] = useState<string>()
+  const [botControlError, setBotControlError] = useState<string>()
 
   const activeBots = dashboard.activeStrategies.length
   const alertCount = dashboard.events.filter((event) => event.tone !== 'neutral').length
@@ -318,6 +530,113 @@ function DashboardPage() {
       `${log.title} ${log.detail} ${log.time}`.toLowerCase().includes(needle),
     )
   }, [activityLog, searchValue])
+  const selectedActiveBot = useMemo<ActiveStrategy | undefined>(
+    () => dashboard.activeStrategies.find((bot) => bot.id === selectedActiveBotId),
+    [dashboard.activeStrategies, selectedActiveBotId],
+  )
+  const gridPreview = useMemo<LadderPreviewModel | undefined>(() => {
+    const lowerPrice = parsePositiveNumber(gridLowerPrice)
+    const upperPrice = parsePositiveNumber(gridUpperPrice)
+    const gridLevelCount = parsePositiveInteger(gridCount)
+    const spacingPct = parsePositiveNumber(gridSpacing)
+
+    if (!lowerPrice || !upperPrice || !gridLevelCount || !spacingPct || upperPrice <= lowerPrice) {
+      return undefined
+    }
+
+    const levels = buildGridLevels(lowerPrice, upperPrice, gridLevelCount, spacingPct)
+    if (levels.length === 0) {
+      return undefined
+    }
+
+    const buyLevels = levels.filter((level) => level < market.price)
+    const sellLevels = levels.filter((level) => level > market.price)
+
+    return {
+      title: 'Fixed-range ladder around the live spot',
+      subtitle:
+        'This mirrors the backend grid calculation, with lower levels marked as buys and upper levels marked as sells around the current market.',
+      levels: [
+        ...levels.map<LadderPreviewLevel>((level, index) => ({
+          id: `grid-${index}-${level}`,
+          price: level,
+          kind: level < market.price ? 'buy' : 'sell',
+          label: `${level < market.price ? 'Buy' : 'Sell'} L${index + 1}`,
+        })),
+        {
+          id: 'grid-spot',
+          price: market.price,
+          kind: 'spot',
+          label: 'Spot now',
+        },
+      ],
+      badges: [
+        `${levels.length} generated levels`,
+        `${buyLevels.length} below spot`,
+        `${sellLevels.length} above spot`,
+        `${spacingPct.toFixed(2)}% spacing`,
+      ],
+      notes: [
+        `Configured range: ${formatCurrency(lowerPrice)} to ${formatCurrency(upperPrice)}.`,
+        `Spot is currently ${formatCurrency(market.price)}, so the ladder splits into ${buyLevels.length} buy levels below and ${sellLevels.length} sell levels above.`,
+        'Paper mode currently seeds cash first, so the lower side is the portion most likely to appear immediately on launch unless BTC inventory is already available.',
+      ],
+    }
+  }, [gridCount, gridLowerPrice, gridSpacing, gridUpperPrice, market.price])
+  const infinityPreview = useMemo<LadderPreviewModel | undefined>(() => {
+    const referencePrice = parsePositiveNumber(infinityReferencePrice)
+    const spacingPct = parsePositiveNumber(infinitySpacingPct)
+    const levelsPerSide = parsePositiveInteger(infinityLevelsPerSide)
+
+    if (!referencePrice || !spacingPct || !levelsPerSide) {
+      return undefined
+    }
+
+    const pivotIndex = infinityIndexBelow(referencePrice, spacingPct, market.price)
+    const buyLevels = Array.from({ length: levelsPerSide }, (_, offset) =>
+      infinityLevelAt(referencePrice, spacingPct, pivotIndex - offset),
+    )
+    const sellLevels = Array.from({ length: levelsPerSide }, (_, offset) =>
+      infinityLevelAt(referencePrice, spacingPct, pivotIndex + 1 + offset),
+    )
+
+    return {
+      title: 'Geometric ladder that tracks the live market',
+      subtitle:
+        'The preview shows the active buy window below spot and sell window above spot, while keeping your reference price as the geometric anchor.',
+      levels: [
+        ...sellLevels.map<LadderPreviewLevel>((level, index) => ({
+          id: `infinity-sell-${index}-${level}`,
+          price: level,
+          kind: 'sell',
+          label: `Sell +${index + 1}`,
+        })),
+        {
+          id: 'infinity-spot',
+          price: market.price,
+          kind: 'spot',
+          label: 'Spot now',
+        },
+        ...buyLevels.map<LadderPreviewLevel>((level, index) => ({
+          id: `infinity-buy-${index}-${level}`,
+          price: level,
+          kind: 'buy',
+          label: `Buy -${index + 1}`,
+        })),
+      ],
+      badges: [
+        `${levelsPerSide} levels per side`,
+        `${buyLevels.length} buys ready`,
+        `${sellLevels.length} sells ready`,
+        `Reference ${formatCurrency(referencePrice)}`,
+      ],
+      notes: [
+        `Reference price anchors the whole curve at ${formatCurrency(referencePrice)}.`,
+        `At ${formatCurrency(market.price)} spot, the active ladder starts near ${formatCurrency(buyLevels[0])} below and ${formatCurrency(sellLevels[0])} above.`,
+        `Each rung is ${spacingPct.toFixed(2)}% away from the next one, so wider spacing means fewer fills and tighter spacing means more frequent re-arming.`,
+      ],
+    }
+  }, [infinityLevelsPerSide, infinityReferencePrice, infinitySpacingPct, market.price])
 
   async function handleRefresh() {
     try {
@@ -505,6 +824,31 @@ function DashboardPage() {
       setCreateBotError(error instanceof Error ? error.message : 'Unable to create the bot right now.')
     } finally {
       setIsCreatingBot(false)
+    }
+  }
+
+  async function handleStopActiveBot() {
+    if (!selectedActiveBot) return
+
+    try {
+      setIsStoppingBot(true)
+      setBotControlError(undefined)
+      setBotControlFeedback(undefined)
+      await stopBot({
+        // @ts-ignore
+        data: { botId: selectedActiveBot.id },
+      })
+      const nextDashboard = await getDashboard()
+      setDashboard(nextDashboard.dashboard)
+      setMarket(nextDashboard.market)
+      setConnection(nextDashboard.connection)
+      setBotControlFeedback(
+        `${selectedActiveBot.name} received a stop request. The dashboard will update as soon as the worker exits cleanly.`,
+      )
+    } catch (error) {
+      setBotControlError(error instanceof Error ? error.message : 'Unable to stop this bot right now.')
+    } finally {
+      setIsStoppingBot(false)
     }
   }
 
@@ -730,8 +1074,13 @@ function DashboardPage() {
                           const isPositive = bot.unrealizedPnlUsd >= 0
                           return (
                             <tr
-                              className="border-t border-zinc-800/30 transition-colors hover:bg-zinc-900/20"
+                              className="cursor-pointer border-t border-zinc-800/30 transition-colors hover:bg-zinc-900/20"
                               key={bot.id}
+                              onClick={() => {
+                                setBotControlError(undefined)
+                                setBotControlFeedback(undefined)
+                                setSelectedActiveBotId(bot.id)
+                              }}
                             >
                               <td className="px-5 py-4">
                                 <div className="flex items-center gap-3">
@@ -746,8 +1095,8 @@ function DashboardPage() {
                                   <div className="min-w-0">
                                     <div className="font-medium text-zinc-200">{bot.name}</div>
                                     <div className="truncate text-xs text-zinc-500">
-                                      Started {formatTimeAgo(bot.createdAt)} • {bot.tradeCount} trade
-                                      {bot.tradeCount === 1 ? '' : 's'} recorded
+                                      Started {formatTimeAgo(bot.createdAt)} • {bot.tradeCount} executed trade
+                                      {bot.tradeCount === 1 ? '' : 's'}
                                     </div>
                                   </div>
                                 </div>
@@ -888,7 +1237,7 @@ function DashboardPage() {
       </ProtectedShell>
 
       {isCreateBotModalOpen ? (
-        <div className="fixed inset-0 z-40 flex items-center justify-center bg-black/65 px-4 backdrop-blur-sm">
+        <div className="fixed inset-0 z-40 overflow-y-auto bg-black/65 px-4 py-4 backdrop-blur-sm">
           <button
             aria-label="Close new bot modal"
             className="absolute inset-0"
@@ -898,7 +1247,7 @@ function DashboardPage() {
               setIsCreateBotModalOpen(false)
             }}
           />
-          <div className="relative z-10 w-full max-w-5xl overflow-hidden rounded-3xl border border-zinc-800 bg-zinc-950 shadow-2xl shadow-black/60">
+          <div className="relative z-10 mx-auto my-4 w-full max-w-5xl max-h-[calc(100vh-2rem)] overflow-y-auto rounded-3xl border border-zinc-800 bg-zinc-950 shadow-2xl shadow-black/60">
             <div className="grid gap-0 lg:grid-cols-[1.15fr_0.95fr]">
               <div className="border-b border-zinc-800/80 bg-[radial-gradient(circle_at_top,_rgba(16,185,129,0.14),_transparent_56%)] p-6 lg:border-b-0 lg:border-r">
                 <p className="text-xs font-medium uppercase tracking-[0.3em] text-emerald-400/80">
@@ -1013,7 +1362,7 @@ function DashboardPage() {
                           className="w-full rounded-xl border border-zinc-800 bg-zinc-900/80 px-4 py-3 text-zinc-100 outline-none transition placeholder:text-zinc-600 focus:border-emerald-400/50 focus:ring-1 focus:ring-emerald-400/50"
                           inputMode="decimal"
                           type="number"
-                          min="0.01"
+                          min="0.1"
                           step="0.1"
                           value={gridSpacing}
                           onChange={(event) => setGridSpacing(event.target.value)}
@@ -1059,7 +1408,7 @@ function DashboardPage() {
                               className="w-full rounded-xl border border-zinc-800 bg-zinc-900/80 px-4 py-3 text-zinc-100 outline-none transition placeholder:text-zinc-600 focus:border-emerald-400/50 focus:ring-1 focus:ring-emerald-400/50"
                               inputMode="decimal"
                               type="number"
-                              min="0.01"
+                              min="0.1"
                               step="0.1"
                               value={gridStopLoss}
                               onChange={(event) => setGridStopLoss(event.target.value)}
@@ -1068,6 +1417,8 @@ function DashboardPage() {
                         ) : null}
                       </div>
                     </div>
+
+                    <LadderPreview model={gridPreview} />
 
                     <div className="rounded-2xl border border-zinc-800 bg-zinc-900/60 p-4 text-sm leading-6 text-zinc-400">
                       Starting this bot creates a live dashboard entry and stores each planned grid
@@ -1224,7 +1575,7 @@ function DashboardPage() {
                         <input
                           className="w-full rounded-xl border border-zinc-800 bg-zinc-900/80 px-4 py-3 text-zinc-100 outline-none transition placeholder:text-zinc-600 focus:border-sky-400/50 focus:ring-1 focus:ring-sky-400/50"
                           inputMode="decimal"
-                          min="0.01"
+                          min="0.1"
                           step="0.1"
                           type="number"
                           value={infinitySpacingPct}
@@ -1239,7 +1590,7 @@ function DashboardPage() {
                           className="w-full rounded-xl border border-zinc-800 bg-zinc-900/80 px-4 py-3 text-zinc-100 outline-none transition placeholder:text-zinc-600 focus:border-sky-400/50 focus:ring-1 focus:ring-sky-400/50"
                           inputMode="decimal"
                           min="0.01"
-                          step="1"
+                          step="0.01"
                           type="number"
                           value={infinityOrderSizeUsd}
                           onChange={(event) => setInfinityOrderSizeUsd(event.target.value)}
@@ -1260,6 +1611,8 @@ function DashboardPage() {
                         />
                       </label>
                     </div>
+
+                    <LadderPreview model={infinityPreview} />
 
                     <div className="rounded-2xl border border-zinc-800 bg-zinc-900/60 p-4 text-sm leading-6 text-zinc-400">
                       Starting this bot stores the reference ladder, two-sided orders, and the
@@ -1297,6 +1650,15 @@ function DashboardPage() {
           </div>
         </div>
       ) : null}
+
+      <BotControlModal
+        bot={selectedActiveBot}
+        error={botControlError}
+        feedback={botControlFeedback}
+        isStopping={isStoppingBot}
+        onClose={() => setSelectedActiveBotId(undefined)}
+        onStop={handleStopActiveBot}
+      />
 
       {isDepositModalOpen ? (
         <div className="fixed inset-0 z-40 flex items-center justify-center bg-black/65 px-4 backdrop-blur-sm">
