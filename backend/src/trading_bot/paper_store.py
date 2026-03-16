@@ -5,7 +5,7 @@ import sqlite3
 from pathlib import Path
 from typing import Any, Optional
 
-from trading_bot.models import GridBotConfig, OrderIntent, OrderSide
+from trading_bot.models import GridBotConfig, InfinityGridBotConfig, OrderIntent, OrderSide
 
 
 DEFAULT_INITIAL_DEPOSIT_USD = 100.0
@@ -62,6 +62,15 @@ class PaperTradingStore:
                     symbol TEXT NOT NULL,
                     exchange TEXT NOT NULL,
                     status TEXT NOT NULL,
+                    budget_usd REAL NOT NULL DEFAULT 0,
+                    usd_balance REAL NOT NULL DEFAULT 0,
+                    btc_balance REAL NOT NULL DEFAULT 0,
+                    initial_usd_balance REAL NOT NULL DEFAULT 0,
+                    initial_btc_balance REAL NOT NULL DEFAULT 0,
+                    initial_btc_cost_usd REAL NOT NULL DEFAULT 0,
+                    released_usd_balance REAL NOT NULL DEFAULT 0,
+                    released_btc_balance REAL NOT NULL DEFAULT 0,
+                    released_to_account INTEGER NOT NULL DEFAULT 0,
                     config_json TEXT NOT NULL,
                     created_at TEXT NOT NULL,
                     started_at TEXT NOT NULL,
@@ -92,6 +101,14 @@ class PaperTradingStore:
                     FOREIGN KEY(user_id) REFERENCES paper_accounts(user_id) ON DELETE CASCADE,
                     FOREIGN KEY(bot_id) REFERENCES bot_instances(id) ON DELETE CASCADE
                 );
+
+                CREATE TABLE IF NOT EXISTS portfolio_snapshots (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    user_id TEXT NOT NULL,
+                    total_equity_usd REAL NOT NULL,
+                    created_at TEXT NOT NULL,
+                    FOREIGN KEY(user_id) REFERENCES paper_accounts(user_id) ON DELETE CASCADE
+                );
                 """
             )
             self._ensure_column(connection, "paper_accounts", "btc_balance", "REAL NOT NULL DEFAULT 0")
@@ -99,6 +116,15 @@ class PaperTradingStore:
             self._ensure_column(connection, "bot_instances", "pid", "INTEGER")
             self._ensure_column(connection, "bot_instances", "heartbeat_at", "TEXT")
             self._ensure_column(connection, "bot_instances", "last_error", "TEXT")
+            self._ensure_column(connection, "bot_instances", "budget_usd", "REAL NOT NULL DEFAULT 0")
+            self._ensure_column(connection, "bot_instances", "usd_balance", "REAL NOT NULL DEFAULT 0")
+            self._ensure_column(connection, "bot_instances", "btc_balance", "REAL NOT NULL DEFAULT 0")
+            self._ensure_column(connection, "bot_instances", "initial_usd_balance", "REAL NOT NULL DEFAULT 0")
+            self._ensure_column(connection, "bot_instances", "initial_btc_balance", "REAL NOT NULL DEFAULT 0")
+            self._ensure_column(connection, "bot_instances", "initial_btc_cost_usd", "REAL NOT NULL DEFAULT 0")
+            self._ensure_column(connection, "bot_instances", "released_usd_balance", "REAL NOT NULL DEFAULT 0")
+            self._ensure_column(connection, "bot_instances", "released_btc_balance", "REAL NOT NULL DEFAULT 0")
+            self._ensure_column(connection, "bot_instances", "released_to_account", "INTEGER NOT NULL DEFAULT 0")
 
     def _ensure_column(
         self,
@@ -143,6 +169,22 @@ class PaperTradingStore:
             (user_id, event_type, tone, title, detail, amount_usd, timestamp),
         )
 
+    def _insert_portfolio_snapshot(
+        self,
+        connection: sqlite3.Connection,
+        *,
+        user_id: str,
+        total_equity_usd: float,
+        timestamp: str,
+    ) -> None:
+        connection.execute(
+            """
+            INSERT INTO portfolio_snapshots (user_id, total_equity_usd, created_at)
+            VALUES (?, ?, ?)
+            """,
+            (user_id, round(total_equity_usd, 2), timestamp),
+        )
+
     def _create_account(
         self,
         connection: sqlite3.Connection,
@@ -176,6 +218,12 @@ class PaperTradingStore:
                 timestamp,
                 timestamp,
             ),
+        )
+        self._insert_portfolio_snapshot(
+            connection,
+            user_id=user_id,
+            total_equity_usd=DEFAULT_INITIAL_DEPOSIT_USD,
+            timestamp=timestamp,
         )
         return connection.execute(
             "SELECT * FROM paper_accounts WHERE user_id = ?",
@@ -267,6 +315,60 @@ class PaperTradingStore:
                 timestamp=timestamp,
             )
             return self._row_to_account_state(row)
+
+    def record_portfolio_snapshot(
+        self,
+        *,
+        user_id: str,
+        total_equity_usd: float,
+        timestamp: str,
+    ) -> None:
+        with self._connect() as connection:
+            self._insert_portfolio_snapshot(
+                connection,
+                user_id=user_id,
+                total_equity_usd=total_equity_usd,
+                timestamp=timestamp,
+            )
+
+    def list_portfolio_snapshots(self, *, user_id: str, limit: int = 96) -> list[dict[str, Any]]:
+        with self._connect() as connection:
+            rows = connection.execute(
+                """
+                SELECT total_equity_usd, created_at
+                FROM (
+                    SELECT total_equity_usd, created_at, id
+                    FROM portfolio_snapshots
+                    WHERE user_id = ?
+                    ORDER BY created_at DESC, id DESC
+                    LIMIT ?
+                )
+                ORDER BY created_at ASC, id ASC
+                """,
+                (user_id, limit),
+            ).fetchall()
+
+        return [
+            {
+                "equityUsd": round(float(row["total_equity_usd"]), 2),
+                "timestamp": row["created_at"],
+            }
+            for row in rows
+        ]
+
+    def reserve_equity_usd(self, *, user_id: str, price: float) -> float:
+        with self._connect() as connection:
+            row = connection.execute(
+                """
+                SELECT usd_balance, btc_balance
+                FROM paper_accounts
+                WHERE user_id = ?
+                """,
+                (user_id,),
+            ).fetchone()
+        if row is None:
+            return 0.0
+        return round(float(row["usd_balance"]) + (float(row["btc_balance"]) * price), 2)
 
     def record_deposit(
         self,
@@ -370,6 +472,11 @@ class PaperTradingStore:
         symbol: str,
         exchange: str,
         config: dict[str, Any],
+        budget_usd: float,
+        reserve_usd_balance: float,
+        reserve_btc_balance: float,
+        initial_usd_balance: float,
+        initial_btc_balance: float,
         orders: list[OrderIntent],
         snapshot_price: float,
         timestamp: str,
@@ -401,6 +508,15 @@ class PaperTradingStore:
                     symbol,
                     exchange,
                     status,
+                    budget_usd,
+                    usd_balance,
+                    btc_balance,
+                    initial_usd_balance,
+                    initial_btc_balance,
+                    initial_btc_cost_usd,
+                    released_usd_balance,
+                    released_btc_balance,
+                    released_to_account,
                     config_json,
                     created_at,
                     started_at,
@@ -408,7 +524,7 @@ class PaperTradingStore:
                     updated_at,
                     last_trade_at
                 )
-                VALUES (?, ?, ?, ?, ?, ?, 'paper-running', ?, ?, ?, NULL, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, 'paper-running', ?, ?, ?, ?, ?, ?, 0, 0, 0, ?, ?, ?, NULL, ?, ?)
                 """,
                 (
                     user_id,
@@ -417,6 +533,12 @@ class PaperTradingStore:
                     strategy_label,
                     symbol,
                     exchange,
+                    round(budget_usd, 2),
+                    round(initial_usd_balance, 8),
+                    round(initial_btc_balance, 8),
+                    round(initial_usd_balance, 8),
+                    round(initial_btc_balance, 8),
+                    round(max(budget_usd - initial_usd_balance, 0.0), 8),
                     json.dumps(config, sort_keys=True),
                     timestamp,
                     timestamp,
@@ -467,12 +589,14 @@ class PaperTradingStore:
                         order.rationale,
                         timestamp,
                     ),
-                )
+            )
 
             connection.execute(
                 """
                 UPDATE paper_accounts
-                SET active_strategy = ?,
+                SET usd_balance = ?,
+                    btc_balance = ?,
+                    active_strategy = ?,
                     bot_status = 'paper-running',
                     paper_run_count = ?,
                     last_paper_run_at = ?,
@@ -480,6 +604,8 @@ class PaperTradingStore:
                 WHERE user_id = ?
                 """,
                 (
+                    round(reserve_usd_balance, 8),
+                    round(reserve_btc_balance, 8),
                     strategy,
                     int(row["paper_run_count"]) + 1,
                     timestamp,
@@ -494,10 +620,11 @@ class PaperTradingStore:
                 tone="positive",
                 title=f"{bot_name} started",
                 detail=(
-                    f"{strategy_label} is now active on {symbol}. "
+                    f"{strategy_label} is now active on {symbol} with ${budget_usd:,.2f} reserved. "
                     f"{len(orders)} planned trade(s) were stored in the paper ledger."
                 ),
                 timestamp=timestamp,
+                amount_usd=budget_usd,
             )
             row = connection.execute(
                 "SELECT * FROM paper_accounts WHERE user_id = ?",
@@ -527,10 +654,9 @@ class PaperTradingStore:
                     b.strategy,
                     b.symbol,
                     b.config_json,
-                    a.usd_balance,
-                    a.btc_balance
+                    b.usd_balance,
+                    b.btc_balance
                 FROM bot_instances b
-                INNER JOIN paper_accounts a ON a.user_id = b.user_id
                 WHERE b.id = ? AND b.status = 'paper-running'
                 """,
                 (numeric_id,),
@@ -674,13 +800,13 @@ class PaperTradingStore:
 
             connection.execute(
                 """
-                UPDATE paper_accounts
+                UPDATE bot_instances
                 SET usd_balance = ?,
                     btc_balance = ?,
                     updated_at = ?
-                WHERE user_id = ?
+                WHERE id = ?
                 """,
-                (usd_balance, btc_balance, timestamp, bot_row["user_id"]),
+                (usd_balance, btc_balance, timestamp, numeric_id),
             )
             connection.execute(
                 """
@@ -714,10 +840,9 @@ class PaperTradingStore:
                     b.name,
                     b.strategy,
                     b.symbol,
-                    a.usd_balance,
-                    a.btc_balance
+                    b.usd_balance,
+                    b.btc_balance
                 FROM bot_instances b
-                INNER JOIN paper_accounts a ON a.user_id = b.user_id
                 WHERE b.id = ? AND b.status = 'paper-running'
                 """,
                 (numeric_id,),
@@ -806,13 +931,13 @@ class PaperTradingStore:
 
             connection.execute(
                 """
-                UPDATE paper_accounts
+                UPDATE bot_instances
                 SET usd_balance = ?,
                     btc_balance = ?,
                     updated_at = ?
-                WHERE user_id = ?
+                WHERE id = ?
                 """,
-                (usd_balance, btc_balance, timestamp, bot_row["user_id"]),
+                (usd_balance, btc_balance, timestamp, numeric_id),
             )
             connection.execute(
                 """
@@ -837,7 +962,7 @@ class PaperTradingStore:
         with self._connect() as connection:
             bot_row = connection.execute(
                 """
-                SELECT id, user_id, strategy, symbol
+                SELECT id, user_id, strategy, symbol, config_json
                 FROM bot_instances
                 WHERE id = ?
                 """,
@@ -845,6 +970,87 @@ class PaperTradingStore:
             ).fetchone()
             if bot_row is None:
                 return
+
+            if bot_row["strategy"] == "infinity-grid":
+                filled_rows = connection.execute(
+                    """
+                    SELECT side, price, amount
+                    FROM paper_trades
+                    WHERE bot_id = ? AND status = 'filled'
+                    ORDER BY created_at ASC, id ASC
+                    """,
+                    (numeric_id,),
+                ).fetchall()
+                if filled_rows:
+                    config = InfinityGridBotConfig(**json.loads(bot_row["config_json"]))
+                    last_filled = filled_rows[-1]
+                    last_side = last_filled["side"]
+                    last_price = round(float(last_filled["price"]), 2)
+                    last_amount = round(float(last_filled["amount"]), 6)
+                    blocked_side = (
+                        OrderSide.SELL.value if last_side == OrderSide.BUY.value else OrderSide.BUY.value
+                    )
+                    level_index = config.index_below(last_price)
+                    replacement_price = (
+                        config.level_at(level_index + 1)
+                        if last_side == OrderSide.BUY.value
+                        else config.level_at(level_index - 1)
+                    )
+
+                    adjusted_orders: list[OrderIntent] = []
+                    adjusted = False
+                    for order in orders:
+                        matches_last_fill = (
+                            order.side.value == blocked_side
+                            and round(order.price or 0.0, 2) == last_price
+                        )
+                        if not matches_last_fill:
+                            adjusted_orders.append(order)
+                            continue
+
+                        adjusted = True
+                        if any(
+                            existing.side.value == blocked_side
+                            and round(existing.price or 0.0, 2) == replacement_price
+                            for existing in orders
+                        ):
+                            continue
+
+                        adjusted_orders.append(
+                            OrderIntent(
+                                symbol=order.symbol,
+                                side=order.side,
+                                order_type=order.order_type,
+                                amount=last_amount,
+                                price=replacement_price,
+                                rationale=order.rationale,
+                            )
+                        )
+
+                    if adjusted:
+                        orders = adjusted_orders
+
+                    blocked_buy_prices: set[float] = set()
+                    for filled in filled_rows:
+                        filled_side = filled["side"]
+                        filled_price = round(float(filled["price"]), 2)
+                        if filled_side == OrderSide.BUY.value:
+                            blocked_buy_prices.add(filled_price)
+                            continue
+
+                        blocked_buy_prices = {
+                            buy_price for buy_price in blocked_buy_prices if filled_price <= buy_price
+                        }
+
+                    if blocked_buy_prices:
+                        orders = [
+                            order
+                            for order in orders
+                            if not (
+                                order.side.value == OrderSide.BUY.value
+                                and round(order.price or 0.0, 2) in blocked_buy_prices
+                            )
+                        ]
 
             existing_rows = connection.execute(
                 """
@@ -996,6 +1202,15 @@ class PaperTradingStore:
                     b.symbol,
                     b.exchange,
                     b.status,
+                    b.budget_usd,
+                    b.usd_balance,
+                    b.btc_balance,
+                    b.initial_usd_balance,
+                    b.initial_btc_balance,
+                    b.initial_btc_cost_usd,
+                    b.released_usd_balance,
+                    b.released_btc_balance,
+                    b.released_to_account,
                     b.config_json,
                     b.created_at,
                     b.started_at,
@@ -1021,6 +1236,12 @@ class PaperTradingStore:
                     b.symbol,
                     b.exchange,
                     b.status,
+                    b.budget_usd,
+                    b.usd_balance,
+                    b.btc_balance,
+                    b.initial_usd_balance,
+                    b.initial_btc_balance,
+                    b.initial_btc_cost_usd,
                     b.config_json,
                     b.created_at,
                     b.started_at,
@@ -1044,6 +1265,15 @@ class PaperTradingStore:
                 "symbol": row["symbol"],
                 "exchange": row["exchange"],
                 "status": row["status"],
+                "budgetUsd": round(float(row["budget_usd"] or 0), 2),
+                "usdBalance": round(float(row["usd_balance"] or 0), 8),
+                "btcBalance": round(float(row["btc_balance"] or 0), 8),
+                "initialUsdBalance": round(float(row["initial_usd_balance"] or 0), 8),
+                "initialBtcBalance": round(float(row["initial_btc_balance"] or 0), 8),
+                "initialBtcCostUsd": round(float(row["initial_btc_cost_usd"] or 0), 8),
+                "releasedUsdBalance": round(float(row["released_usd_balance"] or 0), 8),
+                "releasedBtcBalance": round(float(row["released_btc_balance"] or 0), 8),
+                "releasedToAccount": bool(row["released_to_account"]),
                 "config": json.loads(row["config_json"]) if row["config_json"] else {},
                 "createdAt": row["created_at"],
                 "startedAt": row["started_at"],
@@ -1074,6 +1304,15 @@ class PaperTradingStore:
                     b.symbol,
                     b.exchange,
                     b.status,
+                    b.budget_usd,
+                    b.usd_balance,
+                    b.btc_balance,
+                    b.initial_usd_balance,
+                    b.initial_btc_balance,
+                    b.initial_btc_cost_usd,
+                    b.released_usd_balance,
+                    b.released_btc_balance,
+                    b.released_to_account,
                     b.config_json,
                     b.created_at,
                     b.started_at,
@@ -1100,6 +1339,12 @@ class PaperTradingStore:
                     b.symbol,
                     b.exchange,
                     b.status,
+                    b.budget_usd,
+                    b.usd_balance,
+                    b.btc_balance,
+                    b.initial_usd_balance,
+                    b.initial_btc_balance,
+                    b.initial_btc_cost_usd,
                     b.config_json,
                     b.created_at,
                     b.started_at,
@@ -1124,6 +1369,15 @@ class PaperTradingStore:
                 "symbol": row["symbol"],
                 "exchange": row["exchange"],
                 "status": row["status"],
+                "budgetUsd": round(float(row["budget_usd"] or 0), 2),
+                "usdBalance": round(float(row["usd_balance"] or 0), 8),
+                "btcBalance": round(float(row["btc_balance"] or 0), 8),
+                "initialUsdBalance": round(float(row["initial_usd_balance"] or 0), 8),
+                "initialBtcBalance": round(float(row["initial_btc_balance"] or 0), 8),
+                "initialBtcCostUsd": round(float(row["initial_btc_cost_usd"] or 0), 8),
+                "releasedUsdBalance": round(float(row["released_usd_balance"] or 0), 8),
+                "releasedBtcBalance": round(float(row["released_btc_balance"] or 0), 8),
+                "releasedToAccount": bool(row["released_to_account"]),
                 "config": json.loads(row["config_json"]) if row["config_json"] else {},
                 "createdAt": row["created_at"],
                 "startedAt": row["started_at"],
@@ -1162,6 +1416,15 @@ class PaperTradingStore:
                     b.pid,
                     b.heartbeat_at,
                     b.last_error,
+                    b.budget_usd,
+                    b.usd_balance,
+                    b.btc_balance,
+                    b.initial_usd_balance,
+                    b.initial_btc_balance,
+                    b.initial_btc_cost_usd,
+                    b.released_usd_balance,
+                    b.released_btc_balance,
+                    b.released_to_account,
                     b.config_json,
                     b.created_at,
                     b.started_at,
@@ -1190,6 +1453,15 @@ class PaperTradingStore:
             "pid": row["pid"],
             "heartbeatAt": row["heartbeat_at"],
             "lastError": row["last_error"],
+            "budgetUsd": round(float(row["budget_usd"] or 0), 2),
+            "usdBalance": round(float(row["usd_balance"] or 0), 8),
+            "btcBalance": round(float(row["btc_balance"] or 0), 8),
+            "initialUsdBalance": round(float(row["initial_usd_balance"] or 0), 8),
+            "initialBtcBalance": round(float(row["initial_btc_balance"] or 0), 8),
+            "initialBtcCostUsd": round(float(row["initial_btc_cost_usd"] or 0), 8),
+            "releasedUsdBalance": round(float(row["released_usd_balance"] or 0), 8),
+            "releasedBtcBalance": round(float(row["released_btc_balance"] or 0), 8),
+            "releasedToAccount": bool(row["released_to_account"]),
             "config": json.loads(row["config_json"]) if row["config_json"] else {},
             "createdAt": row["created_at"],
             "startedAt": row["started_at"],
@@ -1273,9 +1545,70 @@ class PaperTradingStore:
                 (timestamp, numeric_id),
             )
 
+    def _release_bot_balances_to_account(
+        self,
+        connection: sqlite3.Connection,
+        *,
+        numeric_id: int,
+        timestamp: str,
+    ) -> Optional[sqlite3.Row]:
+        row = connection.execute(
+            """
+            SELECT
+                b.name,
+                b.user_id,
+                b.usd_balance,
+                b.btc_balance,
+                b.released_to_account,
+                a.usd_balance AS account_usd_balance,
+                a.btc_balance AS account_btc_balance
+            FROM bot_instances b
+            INNER JOIN paper_accounts a ON a.user_id = b.user_id
+            WHERE b.id = ?
+            """,
+            (numeric_id,),
+        ).fetchone()
+        if row is None or bool(row["released_to_account"]):
+            return row
+
+        released_usd_balance = round(float(row["usd_balance"] or 0), 8)
+        released_btc_balance = round(float(row["btc_balance"] or 0), 8)
+        next_account_usd = round(float(row["account_usd_balance"] or 0) + released_usd_balance, 8)
+        next_account_btc = round(float(row["account_btc_balance"] or 0) + released_btc_balance, 8)
+
+        connection.execute(
+            """
+            UPDATE paper_accounts
+            SET usd_balance = ?,
+                btc_balance = ?,
+                updated_at = ?
+            WHERE user_id = ?
+            """,
+            (next_account_usd, next_account_btc, timestamp, row["user_id"]),
+        )
+        connection.execute(
+            """
+            UPDATE bot_instances
+            SET released_usd_balance = ?,
+                released_btc_balance = ?,
+                released_to_account = 1,
+                usd_balance = 0,
+                btc_balance = 0,
+                updated_at = ?
+            WHERE id = ?
+            """,
+            (released_usd_balance, released_btc_balance, timestamp, numeric_id),
+        )
+        return row
+
     def mark_bot_stopped(self, *, bot_id: str, timestamp: str) -> None:
         numeric_id = int(bot_id.replace("bot-", "", 1))
         with self._connect() as connection:
+            self._release_bot_balances_to_account(
+                connection,
+                numeric_id=numeric_id,
+                timestamp=timestamp,
+            )
             connection.execute(
                 """
                 UPDATE bot_instances
@@ -1290,7 +1623,11 @@ class PaperTradingStore:
                 (timestamp, timestamp, timestamp, numeric_id),
             )
             row = connection.execute(
-                "SELECT name, user_id FROM bot_instances WHERE id = ?",
+                """
+                SELECT name, user_id, released_usd_balance, released_btc_balance
+                FROM bot_instances
+                WHERE id = ?
+                """,
                 (numeric_id,),
             ).fetchone()
             if row is not None:
@@ -1305,13 +1642,22 @@ class PaperTradingStore:
                     event_type="bot_stopped",
                     tone="neutral",
                     title=f"{row['name']} stopped",
-                    detail="Bot worker exited cleanly after a stop request.",
+                    detail=(
+                        "Bot worker exited cleanly after a stop request. "
+                        f"Released ${float(row['released_usd_balance'] or 0):,.2f} and "
+                        f"{float(row['released_btc_balance'] or 0):.6f} BTC back to the reserve."
+                    ),
                     timestamp=timestamp,
                 )
 
     def mark_bot_crashed(self, *, bot_id: str, error: str, timestamp: str) -> None:
         numeric_id = int(bot_id.replace("bot-", "", 1))
         with self._connect() as connection:
+            self._release_bot_balances_to_account(
+                connection,
+                numeric_id=numeric_id,
+                timestamp=timestamp,
+            )
             connection.execute(
                 """
                 UPDATE bot_instances
@@ -1326,7 +1672,7 @@ class PaperTradingStore:
             )
             row = connection.execute(
                 """
-                SELECT name, user_id
+                SELECT name, user_id, released_usd_balance, released_btc_balance
                 FROM bot_instances
                 WHERE id = ?
                 """,
@@ -1344,7 +1690,11 @@ class PaperTradingStore:
                     event_type="bot_crashed",
                     tone="warning",
                     title=f"{row['name']} crashed",
-                    detail=error[:500],
+                    detail=(
+                        f"{error[:380]} "
+                        f"Released ${float(row['released_usd_balance'] or 0):,.2f} and "
+                        f"{float(row['released_btc_balance'] or 0):.6f} BTC back to the reserve."
+                    ),
                     timestamp=timestamp,
                 )
 

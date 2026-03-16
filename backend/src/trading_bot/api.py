@@ -47,6 +47,7 @@ class InfinityGridConfigRequest(BaseModel):
 
 class CreateBotRequest(UserScopedRequest):
     strategy: StrategyType
+    budget_usd: float = Field(gt=0)
     grid_config: Optional[GridConfigRequest] = None
     rebalance_config: Optional[RebalanceConfigRequest] = None
     infinity_config: Optional[InfinityGridConfigRequest] = None
@@ -141,6 +142,7 @@ def create_api(trading_app: Optional[TradingBotApp] = None) -> FastAPI:
         try:
             return app_state.create_bot(
                 payload.strategy,
+                budget_usd=payload.budget_usd,
                 user_id=payload.user_id,
                 user_name=payload.user_name,
                 grid_config=payload.grid_config.model_dump() if payload.grid_config else None,

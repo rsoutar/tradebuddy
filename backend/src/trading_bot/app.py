@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import asdict
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Optional, Union
 
@@ -36,6 +36,8 @@ from trading_bot.settings import AppSettings, load_settings
 from trading_bot.strategies.grid import GridStrategy
 from trading_bot.strategies.infinity_grid import InfinityGridStrategy
 from trading_bot.strategies.rebalance import RebalanceStrategy
+
+MIN_EFFECTIVE_ORDER_USD = 10.0
 
 
 class TradingBotApp:
@@ -216,6 +218,65 @@ class TradingBotApp:
             "notional": notional,
         }
 
+    def _minimum_budget_required(
+        self,
+        strategy_type: StrategyType,
+        snapshot: MarketSnapshot,
+        config: Union[GridBotConfig, RebalanceBotConfig, InfinityGridBotConfig],
+    ) -> tuple[float, Optional[str]]:
+        if strategy_type is StrategyType.GRID:
+            if not isinstance(config, GridBotConfig):
+                raise ValueError("Grid budget validation requires a grid configuration.")
+            buy_levels = [level for level in config.price_levels() if level < snapshot.price]
+            if not buy_levels:
+                return 0.0, "Grid range needs at least one buy level below the live price to deploy budget."
+            required_budget = (len(buy_levels) * MIN_EFFECTIVE_ORDER_USD) / 0.45
+            return round(required_budget, 2), None
+
+        if strategy_type is StrategyType.REBALANCE:
+            if not isinstance(config, RebalanceBotConfig):
+                raise ValueError("Rebalance budget validation requires a rebalance configuration.")
+            active_legs = int(config.target_btc_ratio > 0) + int(config.target_btc_ratio < 1)
+            required_budget = max(MIN_EFFECTIVE_ORDER_USD, active_legs * MIN_EFFECTIVE_ORDER_USD)
+            return round(required_budget, 2), None
+
+        if not isinstance(config, InfinityGridBotConfig):
+            raise ValueError("Infinity grid budget validation requires an infinity grid configuration.")
+        required_budget = config.order_size_usd * config.levels_per_side * 2
+        return round(required_budget, 2), None
+
+    def _initial_bot_balances(
+        self,
+        strategy_type: StrategyType,
+        budget_usd: float,
+        snapshot: MarketSnapshot,
+        config: Union[GridBotConfig, RebalanceBotConfig, InfinityGridBotConfig],
+    ) -> list[Balance]:
+        if strategy_type is StrategyType.GRID:
+            return [
+                Balance(asset="BTC", free=0.0, locked=0.0),
+                Balance(asset="USDT", free=round(budget_usd, 8), locked=0.0),
+            ]
+
+        if strategy_type is StrategyType.REBALANCE:
+            if not isinstance(config, RebalanceBotConfig):
+                raise ValueError("Rebalance allocation requires a rebalance configuration.")
+            btc_value = round(budget_usd * config.target_btc_ratio, 8)
+            usdt_value = round(max(budget_usd - btc_value, 0.0), 8)
+            btc_amount = round((btc_value / snapshot.price) if snapshot.price > 0 else 0.0, 8)
+            return [
+                Balance(asset="BTC", free=btc_amount, locked=0.0),
+                Balance(asset="USDT", free=usdt_value, locked=0.0),
+            ]
+
+        half_budget = round(budget_usd / 2, 8)
+        btc_amount = round((half_budget / snapshot.price) if snapshot.price > 0 else 0.0, 8)
+        usdt_value = round(budget_usd - half_budget, 8)
+        return [
+            Balance(asset="BTC", free=btc_amount, locked=0.0),
+            Balance(asset="USDT", free=usdt_value, locked=0.0),
+        ]
+
     def _estimate_bot_metrics(
         self,
         strategy_type: StrategyType,
@@ -339,6 +400,55 @@ class TradingBotApp:
             Balance(asset="USDT", free=account_state["usd_balance"], locked=0.0),
         ]
 
+    def _bot_balances(self, bot_state: dict[str, Any]) -> list[Balance]:
+        return [
+            Balance(asset="BTC", free=float(bot_state.get("btcBalance", 0.0)), locked=0.0),
+            Balance(asset="USDT", free=float(bot_state.get("usdBalance", 0.0)), locked=0.0),
+        ]
+
+    def _bot_equity_usd(self, bot_state: dict[str, Any], snapshot: MarketSnapshot) -> float:
+        usd_balance = float(bot_state.get("usdBalance", 0.0))
+        btc_balance = float(bot_state.get("btcBalance", 0.0))
+        return round(usd_balance + (btc_balance * snapshot.price), 2)
+
+    def _portfolio_total_usd(
+        self,
+        account_state: dict[str, Any],
+        bot_rows: list[dict[str, Any]],
+        snapshot: MarketSnapshot,
+    ) -> float:
+        reserve_total = account_state["usd_balance"] + (account_state["btc_balance"] * snapshot.price)
+        bot_total = sum(self._bot_equity_usd(bot_row, snapshot) for bot_row in bot_rows)
+        return round(reserve_total + bot_total, 2)
+
+    def _reserve_total_usd(self, account_state: dict[str, Any], snapshot: MarketSnapshot) -> float:
+        return round(
+            float(account_state["usd_balance"]) + (float(account_state["btc_balance"]) * snapshot.price),
+            2,
+        )
+
+    def _reserve_after_funding_bot(
+        self,
+        account_state: dict[str, Any],
+        budget_usd: float,
+        snapshot: MarketSnapshot,
+    ) -> tuple[float, float]:
+        next_usd_balance = round(float(account_state["usd_balance"]), 8)
+        next_btc_balance = round(float(account_state["btc_balance"]), 8)
+        remaining_budget_usd = round(budget_usd, 8)
+
+        usd_consumed = min(next_usd_balance, remaining_budget_usd)
+        next_usd_balance = round(next_usd_balance - usd_consumed, 8)
+        remaining_budget_usd = round(remaining_budget_usd - usd_consumed, 8)
+
+        if remaining_budget_usd > 0:
+            btc_needed = round(remaining_budget_usd / snapshot.price, 8) if snapshot.price > 0 else 0.0
+            if next_btc_balance + 1e-9 < btc_needed:
+                raise ValueError("Reserve BTC is insufficient to cover the requested budget.")
+            next_btc_balance = round(max(next_btc_balance - btc_needed, 0.0), 8)
+
+        return next_usd_balance, next_btc_balance
+
     def _process_snapshot(self, symbol: str) -> Optional[MarketSnapshot]:
         if not self._enable_market_stream and isinstance(self.exchange_client, MockExchangeClient):
             return SharedSnapshotFileMarketData(self._shared_snapshot_path()).get_snapshot(symbol)
@@ -411,12 +521,7 @@ class TradingBotApp:
                 timestamp=self._timestamp(),
             )
 
-        account_state = self.paper_store.ensure_account(
-            user_id=bot["userId"],
-            user_name=bot["userName"],
-            timestamp=self._timestamp(),
-        )
-        balances = self._paper_balances(account_state)
+        balances = self._bot_balances(bot)
         if strategy_type is StrategyType.GRID:
             config_override = self._grid_config_from_payload(bot["config"])
         elif strategy_type is StrategyType.REBALANCE:
@@ -441,9 +546,10 @@ class TradingBotApp:
                 timestamp=self._timestamp(),
             )
         refreshed_bot = self.paper_store.get_bot_instance(bot_id=bot_id)
+        refreshed_balances = self._bot_balances(refreshed_bot) if refreshed_bot is not None else []
         return {
             "snapshot": snapshot,
-            "balances": balances,
+            "balances": refreshed_balances or balances,
             "filledOrders": filled_orders,
             "lastTradeAt": refreshed_bot["lastTradeAt"] if refreshed_bot is not None else None,
             "evaluation": evaluation_data,
@@ -451,12 +557,12 @@ class TradingBotApp:
 
     def _bot_position_metrics(
         self,
-        bot_id: str,
+        bot_row: dict[str, Any],
         snapshot: MarketSnapshot,
     ) -> dict[str, Any]:
-        trades = self.paper_store.list_executed_bot_trades(bot_id=bot_id)
-        position_btc = 0.0
-        position_cost_usd = 0.0
+        trades = self.paper_store.list_executed_bot_trades(bot_id=bot_row["id"])
+        position_btc = float(bot_row.get("initialBtcBalance", 0.0))
+        position_cost_usd = float(bot_row.get("initialBtcCostUsd", 0.0))
 
         for trade in trades:
             amount = float(trade["amount"])
@@ -477,16 +583,31 @@ class TradingBotApp:
             position_btc = max(position_btc - sell_amount, 0.0)
             position_cost_usd = max(position_cost_usd - (average_cost * sell_amount), 0.0)
 
-        position_value_usd = round(position_btc * snapshot.price, 2)
+        current_btc_balance = float(bot_row.get("btcBalance", 0.0))
+        current_usd_balance = float(bot_row.get("usdBalance", 0.0))
+        if bool(bot_row.get("releasedToAccount")) and bot_row.get("status") != "paper-running":
+            current_btc_balance = float(bot_row.get("releasedBtcBalance", current_btc_balance))
+            current_usd_balance = float(bot_row.get("releasedUsdBalance", current_usd_balance))
+        current_equity_usd = round(current_usd_balance + (current_btc_balance * snapshot.price), 2)
+        budget_usd = round(float(bot_row.get("budgetUsd", 0.0)), 2)
+        position_value_usd = round(current_btc_balance * snapshot.price, 2)
         unrealized_pnl_usd = round(position_value_usd - position_cost_usd, 2)
         unrealized_pnl_pct = (
             round((unrealized_pnl_usd / position_cost_usd) * 100, 2) if position_cost_usd > 0 else 0.0
         )
+        total_pnl_usd = round(current_equity_usd - budget_usd, 2)
+        total_pnl_pct = round((total_pnl_usd / budget_usd) * 100, 2) if budget_usd > 0 else 0.0
 
         return {
             "positionValueUsd": position_value_usd,
+            "currentEquityUsd": current_equity_usd,
+            "availableUsd": round(current_usd_balance, 2),
+            "btcBalance": round(current_btc_balance, 8),
+            "budgetUsd": budget_usd,
             "unrealizedPnlUsd": unrealized_pnl_usd,
             "unrealizedPnlPct": unrealized_pnl_pct,
+            "totalPnlUsd": total_pnl_usd,
+            "totalPnlPct": total_pnl_pct,
             "lastTradeAt": trades[-1]["createdAt"] if trades else None,
         }
 
@@ -511,13 +632,11 @@ class TradingBotApp:
                 f"Range ${config['lower_price']:,.0f} to ${config['upper_price']:,.0f} "
                 f"across {level_count} levels{stop_loss_summary}{upper_stop_summary}"
             )
-            pnl_modifier = 0.18
         elif bot_row["strategy"] == StrategyType.REBALANCE.value:
             config_summary = (
                 f"Target BTC {config['target_btc_ratio'] * 100:.0f}% with "
                 f"{config['rebalance_threshold_pct']:.1f}% drift threshold"
             )
-            pnl_modifier = 0.08
         else:
             config_summary = (
                 f"Reference ${config.get('reference_price', config.get('lower_start_price', snapshot.price)):,.0f} • "
@@ -525,13 +644,19 @@ class TradingBotApp:
                 f"${float(config.get('order_size_usd', 100.0)):,.0f} per order • "
                 f"{float(config['spacing_pct']):.1f}% spacing"
             )
-        position_metrics = self._bot_position_metrics(bot_row["id"], snapshot)
+        position_metrics = self._bot_position_metrics(bot_row, snapshot)
         return {
             **bot_row,
             "configSummary": config_summary,
+            "budgetUsd": position_metrics["budgetUsd"],
+            "currentEquityUsd": position_metrics["currentEquityUsd"],
+            "availableUsd": position_metrics["availableUsd"],
+            "btcBalance": position_metrics["btcBalance"],
             "totalNotionalUsd": position_metrics["positionValueUsd"],
             "unrealizedPnlUsd": position_metrics["unrealizedPnlUsd"],
             "unrealizedPnlPct": position_metrics["unrealizedPnlPct"],
+            "totalPnlUsd": position_metrics["totalPnlUsd"],
+            "totalPnlPct": position_metrics["totalPnlPct"],
             "lastTradeAt": position_metrics["lastTradeAt"],
         }
 
@@ -602,10 +727,41 @@ class TradingBotApp:
             for strategy_type in StrategyType
         ]
         persisted_events = self.paper_store.list_events(user_id=user_id)
+        bot_rows = self.paper_store.list_bot_instances(user_id=user_id)
+        active_bot_rows = [bot for bot in bot_rows if bot["status"] == "paper-running"]
         active_strategies = [
             self._active_strategy_summary(bot, snapshot)
             for bot in self.paper_store.list_active_strategies(user_id=user_id)
         ]
+        total_portfolio_usd = self._portfolio_total_usd(account_state, active_bot_rows, snapshot)
+        available_reserve_usd = self._reserve_total_usd(account_state, snapshot)
+        allocated_capital_usd = round(sum(bot.get("budgetUsd", 0.0) for bot in active_bot_rows), 2)
+        self.paper_store.record_portfolio_snapshot(
+            user_id=user_id,
+            total_equity_usd=total_portfolio_usd,
+            timestamp=self._timestamp(),
+        )
+        portfolio_snapshots = self.paper_store.list_portfolio_snapshots(user_id=user_id, limit=96)
+        if not portfolio_snapshots:
+            portfolio_snapshots = [
+                {
+                    "equityUsd": total_portfolio_usd,
+                    "timestamp": self._timestamp(),
+                }
+            ]
+        current_snapshot = portfolio_snapshots[-1]
+        prior_cutoff = self._utcnow() - timedelta(hours=24)
+        prior_portfolio_snapshot = next(
+            (
+                item
+                for item in reversed(portfolio_snapshots)
+                if datetime.fromisoformat(item["timestamp"]) <= prior_cutoff
+            ),
+            portfolio_snapshots[0],
+        )
+        profit_24h_usd = round(current_snapshot["equityUsd"] - prior_portfolio_snapshot["equityUsd"], 2)
+        baseline_equity = prior_portfolio_snapshot["equityUsd"]
+        profit_24h_pct = round((profit_24h_usd / baseline_equity) * 100, 2) if baseline_equity > 0 else 0.0
 
         total_notional = sum(item["notional"] for item in evaluations)
         if total_notional <= 0:
@@ -640,7 +796,14 @@ class TradingBotApp:
             "connection": self._market_connection_summary(),
             "balances": [asdict(balance) for balance in balances],
             "dashboard": {
-                "capitalUsd": self._capital_usd(balances, snapshot),
+                "capitalUsd": total_portfolio_usd,
+                "availableCashUsd": round(account_state["usd_balance"], 2),
+                "availableReserveUsd": available_reserve_usd,
+                "availableBtc": round(account_state["btc_balance"], 8),
+                "allocatedCapitalUsd": allocated_capital_usd,
+                "profit24hUsd": profit_24h_usd,
+                "profit24hPct": profit_24h_pct,
+                "portfolioPerformance": portfolio_snapshots,
                 "activeStrategy": account_state["active_strategy"],
                 "botStatus": account_state["bot_status"],
                 "paperRunCount": account_state["paper_run_count"],
@@ -933,6 +1096,7 @@ class TradingBotApp:
         self,
         strategy_type: StrategyType,
         *,
+        budget_usd: float,
         user_id: str = "demo-user",
         user_name: str = "Demo Trader",
         grid_config: Optional[dict[str, Any]] = None,
@@ -946,7 +1110,12 @@ class TradingBotApp:
             user_name=user_name,
             timestamp=timestamp,
         )
-        balances = self._paper_balances(account_state)
+        budget_usd = round(budget_usd, 2)
+        available_reserve_usd = self._reserve_total_usd(account_state, snapshot)
+        if available_reserve_usd + 1e-9 < budget_usd:
+            raise ValueError(
+                f"Available reserve is ${available_reserve_usd:,.2f}, so the requested budget of ${budget_usd:,.2f} cannot be reserved."
+            )
         config_override = None
         if strategy_type is StrategyType.GRID:
             config_override = self._grid_config_from_payload(grid_config)
@@ -954,15 +1123,39 @@ class TradingBotApp:
             config_override = self._rebalance_config_from_payload(rebalance_config)
         else:
             config_override = self._infinity_grid_config_from_payload(infinity_config)
+        if config_override is None:
+            raise ValueError("Bot configuration is required before reserving budget.")
+        required_budget_usd, blocking_reason = self._minimum_budget_required(
+            strategy_type,
+            snapshot,
+            config_override,
+        )
+        if blocking_reason:
+            raise ValueError(blocking_reason)
+        if budget_usd + 1e-9 < required_budget_usd:
+            raise ValueError(
+                f"This configuration needs at least ${required_budget_usd:,.2f} to run, but only ${budget_usd:,.2f} was provided."
+            )
+        bot_balances = self._initial_bot_balances(
+            strategy_type,
+            budget_usd,
+            snapshot,
+            config_override,
+        )
+        reserve_usd_balance, reserve_btc_balance = self._reserve_after_funding_bot(
+            account_state,
+            budget_usd,
+            snapshot,
+        )
         evaluation_data = self._evaluate_strategy(
             strategy_type,
             snapshot,
-            balances,
+            bot_balances,
             config_override=config_override,
         )
         planned_orders = self._executable_orders(
             snapshot,
-            balances,
+            bot_balances,
             evaluation_data["evaluation"].orders,
         )
         created_bot = self.paper_store.record_bot_start(
@@ -973,6 +1166,17 @@ class TradingBotApp:
             symbol=snapshot.symbol,
             exchange=self.settings.exchange.exchange_id.title(),
             config=asdict(evaluation_data["config"]),
+            budget_usd=budget_usd,
+            reserve_usd_balance=reserve_usd_balance,
+            reserve_btc_balance=reserve_btc_balance,
+            initial_usd_balance=next(
+                (balance.free for balance in bot_balances if balance.asset == "USDT"),
+                0.0,
+            ),
+            initial_btc_balance=next(
+                (balance.free for balance in bot_balances if balance.asset == "BTC"),
+                0.0,
+            ),
             orders=planned_orders,
             snapshot_price=snapshot.price,
             timestamp=timestamp,

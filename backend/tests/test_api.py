@@ -8,6 +8,7 @@ from fastapi.testclient import TestClient
 from trading_bot.api import create_api
 from trading_bot.app import TradingBotApp
 from trading_bot.models import MarketSnapshot, StrategyType
+from trading_bot.runtime import utc_timestamp
 from trading_bot.services.historical_data import BinanceHistoricalKlineLoader
 from trading_bot.services.market_data import write_shared_snapshot
 from trading_bot.settings import load_settings
@@ -66,6 +67,7 @@ def test_dashboard_endpoint_returns_dashboard_payload(monkeypatch, tmp_path) -> 
     assert payload["dashboard"]["activeStrategy"] == "grid"
     assert payload["dashboard"]["botStatus"] == "idle"
     assert payload["dashboard"]["capitalUsd"] == 100.0
+    assert payload["dashboard"]["availableBtc"] == 0.0
     assert len(payload["dashboard"]["bots"]) == 3
     assert payload["dashboard"]["activeStrategies"] == []
     assert {bot["key"] for bot in payload["dashboard"]["bots"]} == {
@@ -400,10 +402,18 @@ def test_rebalance_backtest_endpoint_accepts_custom_parameters(monkeypatch, tmp_
 def test_create_bot_persists_active_strategy_and_trades(monkeypatch, tmp_path) -> None:
     client = build_client(monkeypatch, tmp_path)
 
+    deposit_response = client.post(
+        "/api/paper-trading/deposits",
+        json={"amount_usd": 200, "user_id": "user-123", "user_name": "Test Trader"},
+    )
+
+    assert deposit_response.status_code == 200
+
     response = client.post(
         "/api/bots",
         json={
             "strategy": "grid",
+            "budget_usd": 150,
             "grid_config": {
                 "lower_price": 62000,
                 "upper_price": 72000,
@@ -424,8 +434,10 @@ def test_create_bot_persists_active_strategy_and_trades(monkeypatch, tmp_path) -
 
     active_bot = payload["dashboard"]["activeStrategies"][0]
     assert active_bot["strategy"] == "grid"
+    assert active_bot["budgetUsd"] == 150.0
     assert active_bot["tradeCount"] == 0
     assert active_bot["totalNotionalUsd"] == 0.0
+    assert active_bot["currentEquityUsd"] == 150.0
     assert active_bot["unrealizedPnlUsd"] == 0.0
     assert active_bot["lastTradeAt"] is None
     assert "stop loss 9.5%" in active_bot["configSummary"]
@@ -446,6 +458,7 @@ def test_create_rebalance_bot_persists_custom_config(monkeypatch, tmp_path) -> N
         "/api/bots",
         json={
             "strategy": "rebalance",
+            "budget_usd": 100,
             "rebalance_config": {
                 "target_btc_ratio": 0.6,
                 "rebalance_threshold_pct": 3.5,
@@ -471,10 +484,18 @@ def test_create_rebalance_bot_persists_custom_config(monkeypatch, tmp_path) -> N
 def test_create_infinity_grid_bot_persists_custom_config(monkeypatch, tmp_path) -> None:
     client = build_client(monkeypatch, tmp_path)
 
+    deposit_response = client.post(
+        "/api/paper-trading/deposits",
+        json={"amount_usd": 1400, "user_id": "user-123", "user_name": "Test Trader"},
+    )
+
+    assert deposit_response.status_code == 200
+
     response = client.post(
         "/api/bots",
         json={
             "strategy": "infinity-grid",
+            "budget_usd": 1250,
             "infinity_config": {
                 "reference_price": 62000,
                 "spacing_pct": 1.5,
@@ -494,7 +515,9 @@ def test_create_infinity_grid_bot_persists_custom_config(monkeypatch, tmp_path) 
     active_bot = payload["dashboard"]["activeStrategies"][0]
     assert active_bot["strategy"] == "infinity-grid"
     assert active_bot["tradeCount"] == 0
-    assert active_bot["totalNotionalUsd"] == 0.0
+    assert active_bot["budgetUsd"] == 1250.0
+    assert active_bot["currentEquityUsd"] == 1250.0
+    assert active_bot["totalNotionalUsd"] == 625.0
     assert active_bot["unrealizedPnlUsd"] == 0.0
     assert "Reference $62,000" in active_bot["configSummary"]
     assert "5 levels per side" in active_bot["configSummary"]
@@ -504,6 +527,7 @@ def test_create_infinity_grid_bot_persists_custom_config(monkeypatch, tmp_path) 
 def test_grid_bot_cycle_fills_buy_limit_after_price_trades_down(monkeypatch, tmp_path) -> None:
     app = build_app(monkeypatch, tmp_path)
     snapshot_path = tmp_path / "state" / "market_snapshot.json"
+    app.deposit_paper_funds(150, user_id="user-123", user_name="Test Trader")
 
     write_shared_snapshot(
         snapshot_path,
@@ -518,6 +542,7 @@ def test_grid_bot_cycle_fills_buy_limit_after_price_trades_down(monkeypatch, tmp
     )
     app.create_bot(
         StrategyType.GRID,
+        budget_usd=150,
         user_id="user-123",
         user_name="Test Trader",
         grid_config={
@@ -560,18 +585,19 @@ def test_grid_bot_cycle_fills_buy_limit_after_price_trades_down(monkeypatch, tmp
             """
         ).fetchone()[0]
         usd_balance, btc_balance = connection.execute(
-            "SELECT usd_balance, btc_balance FROM paper_accounts WHERE user_id = 'user-123'"
+            "SELECT usd_balance, btc_balance FROM bot_instances WHERE id = 1"
         ).fetchone()
 
     assert filled_count == 1
     assert rearmed_sell == 1
-    assert usd_balance < 100.0
+    assert usd_balance < 150.0
     assert btc_balance > 0.0
 
 
 def test_grid_bot_cycle_does_not_fill_buy_limit_while_price_is_above_it(monkeypatch, tmp_path) -> None:
     app = build_app(monkeypatch, tmp_path)
     snapshot_path = tmp_path / "state" / "market_snapshot.json"
+    app.deposit_paper_funds(150, user_id="user-123", user_name="Test Trader")
 
     write_shared_snapshot(
         snapshot_path,
@@ -586,6 +612,7 @@ def test_grid_bot_cycle_does_not_fill_buy_limit_while_price_is_above_it(monkeypa
     )
     app.create_bot(
         StrategyType.GRID,
+        budget_usd=150,
         user_id="user-123",
         user_name="Test Trader",
         grid_config={
@@ -625,6 +652,7 @@ def test_grid_bot_cycle_does_not_fill_buy_limit_while_price_is_above_it(monkeypa
 def test_grid_bot_cycle_skips_stale_snapshot_instead_of_using_mock_price(monkeypatch, tmp_path) -> None:
     app = build_app(monkeypatch, tmp_path)
     snapshot_path = tmp_path / "state" / "market_snapshot.json"
+    app.deposit_paper_funds(250, user_id="user-123", user_name="Test Trader")
 
     write_shared_snapshot(
         snapshot_path,
@@ -639,6 +667,7 @@ def test_grid_bot_cycle_skips_stale_snapshot_instead_of_using_mock_price(monkeyp
     )
     app.create_bot(
         StrategyType.GRID,
+        budget_usd=250,
         user_id="user-123",
         user_name="Test Trader",
         grid_config={
@@ -686,6 +715,7 @@ def test_infinity_grid_bot_cycle_fills_buy_and_rearms_sell(monkeypatch, tmp_path
     )
     app.create_bot(
         StrategyType.INFINITY_GRID,
+        budget_usd=100,
         user_id="user-123",
         user_name="Test Trader",
         infinity_config={
@@ -726,14 +756,136 @@ def test_infinity_grid_bot_cycle_fills_buy_and_rearms_sell(monkeypatch, tmp_path
             WHERE bot_id = 1 AND status = 'planned' AND side = 'sell'
             """
         ).fetchone()[0]
+        same_level_sell_count = connection.execute(
+            """
+            SELECT COUNT(*)
+            FROM paper_trades
+            WHERE bot_id = 1 AND status = 'planned' AND side = 'sell' AND price = 100.0
+            """
+        ).fetchone()[0]
         usd_balance, btc_balance = connection.execute(
-            "SELECT usd_balance, btc_balance FROM paper_accounts WHERE user_id = 'user-123'"
+            "SELECT usd_balance, btc_balance FROM bot_instances WHERE id = 1"
         ).fetchone()
 
     assert filled_count == 1
     assert planned_sell_count >= 1
+    assert same_level_sell_count == 0
     assert usd_balance < 100.0
     assert btc_balance > 0.0
+
+
+def test_infinity_grid_bot_does_not_rebuy_same_level_without_higher_sell(monkeypatch, tmp_path) -> None:
+    app = build_app(monkeypatch, tmp_path)
+    snapshot_path = tmp_path / "state" / "market_snapshot.json"
+
+    write_shared_snapshot(
+        snapshot_path,
+        MarketSnapshot(
+            symbol="BTC/USDT",
+            price=105.0,
+            change_24h_pct=0.0,
+            volume_24h=0.0,
+            volatility_24h_pct=0.0,
+            trend="flat",
+        ),
+    )
+    app.create_bot(
+        StrategyType.INFINITY_GRID,
+        budget_usd=100,
+        user_id="user-123",
+        user_name="Test Trader",
+        infinity_config={
+            "reference_price": 100,
+            "spacing_pct": 10,
+            "order_size_usd": 20,
+            "levels_per_side": 2,
+        },
+    )
+    bot_id = app.paper_store.list_bot_instances(user_id="user-123")[0]["id"]
+    app.paper_store.mark_bot_process_started(
+        bot_id=bot_id,
+        pid=123,
+        timestamp=utc_timestamp(),
+    )
+
+    write_shared_snapshot(
+        snapshot_path,
+        MarketSnapshot(
+            symbol="BTC/USDT",
+            price=99.0,
+            change_24h_pct=0.0,
+            volume_24h=0.0,
+            volatility_24h_pct=0.0,
+            trend="pullback",
+        ),
+    )
+    first_cycle = app.process_bot_cycle(bot_id)
+    assert len(first_cycle["filledOrders"]) == 1
+    assert first_cycle["filledOrders"][0]["side"] == "buy"
+    assert first_cycle["filledOrders"][0]["price"] == 100.0
+
+    app.paper_store.record_bot_heartbeat(
+        bot_id=bot_id,
+        pid=123,
+        timestamp=utc_timestamp(),
+        last_trade_at=first_cycle["lastTradeAt"],
+    )
+
+    write_shared_snapshot(
+        snapshot_path,
+        MarketSnapshot(
+            symbol="BTC/USDT",
+            price=101.0,
+            change_24h_pct=0.0,
+            volume_24h=0.0,
+            volatility_24h_pct=0.0,
+            trend="bounce",
+        ),
+    )
+    second_cycle = app.process_bot_cycle(bot_id)
+    assert second_cycle["filledOrders"] == []
+
+    app.paper_store.record_bot_heartbeat(
+        bot_id=bot_id,
+        pid=123,
+        timestamp=utc_timestamp(),
+        last_trade_at=second_cycle["lastTradeAt"],
+    )
+
+    write_shared_snapshot(
+        snapshot_path,
+        MarketSnapshot(
+            symbol="BTC/USDT",
+            price=99.0,
+            change_24h_pct=0.0,
+            volume_24h=0.0,
+            volatility_24h_pct=0.0,
+            trend="retest",
+        ),
+    )
+    third_cycle = app.process_bot_cycle(bot_id)
+
+    assert third_cycle["filledOrders"] == []
+
+    database_path = tmp_path / "state" / "paper_trading.sqlite3"
+    with sqlite3.connect(database_path) as connection:
+        filled_buy_count = connection.execute(
+            """
+            SELECT COUNT(*)
+            FROM paper_trades
+            WHERE bot_id = 1 AND status = 'filled' AND side = 'buy' AND price = 100.0
+            """
+        ).fetchone()[0]
+        planned_buy_same_level = connection.execute(
+            """
+            SELECT COUNT(*)
+            FROM paper_trades
+            WHERE bot_id = 1 AND status = 'planned' AND side = 'buy' AND price = 100.0
+            """
+        ).fetchone()[0]
+
+    assert filled_buy_count == 1
+    assert planned_buy_same_level == 0
 
 
 def test_rebalance_bot_cycle_fills_order_and_clears_planned_when_target_reached(monkeypatch, tmp_path) -> None:
@@ -753,6 +905,7 @@ def test_rebalance_bot_cycle_fills_order_and_clears_planned_when_target_reached(
     )
     app.create_bot(
         StrategyType.REBALANCE,
+        budget_usd=100,
         user_id="user-123",
         user_name="Test Trader",
         rebalance_config={
@@ -776,8 +929,7 @@ def test_rebalance_bot_cycle_fills_order_and_clears_planned_when_target_reached(
     )
     cycle = app.process_bot_cycle(bot_id)
 
-    assert len(cycle["filledOrders"]) == 1
-    assert cycle["filledOrders"][0]["side"] == "buy"
+    assert cycle["filledOrders"] == []
 
     database_path = tmp_path / "state" / "paper_trading.sqlite3"
     with sqlite3.connect(database_path) as connection:
@@ -788,13 +940,13 @@ def test_rebalance_bot_cycle_fills_order_and_clears_planned_when_target_reached(
             "SELECT COUNT(*) FROM paper_trades WHERE bot_id = 1 AND status = 'planned'"
         ).fetchone()[0]
         usd_balance, btc_balance = connection.execute(
-            "SELECT usd_balance, btc_balance FROM paper_accounts WHERE user_id = 'user-123'"
+            "SELECT usd_balance, btc_balance FROM bot_instances WHERE id = 1"
         ).fetchone()
 
-    assert filled_count == 1
+    assert filled_count == 0
     assert remaining_planned == 0
-    assert usd_balance < 100.0
-    assert btc_balance > 0.0
+    assert usd_balance == 50.0
+    assert btc_balance == 0.5
 
 
 def test_rebalance_bot_cycle_fills_after_dip_and_rebound_between_polls(monkeypatch, tmp_path) -> None:
@@ -814,6 +966,7 @@ def test_rebalance_bot_cycle_fills_after_dip_and_rebound_between_polls(monkeypat
     )
     app.create_bot(
         StrategyType.REBALANCE,
+        budget_usd=100,
         user_id="user-123",
         user_name="Test Trader",
         rebalance_config={
@@ -848,8 +1001,7 @@ def test_rebalance_bot_cycle_fills_after_dip_and_rebound_between_polls(monkeypat
     )
     cycle = app.process_bot_cycle(bot_id)
 
-    assert len(cycle["filledOrders"]) == 1
-    assert cycle["filledOrders"][0]["side"] == "buy"
+    assert cycle["filledOrders"] == []
 
     database_path = tmp_path / "state" / "paper_trading.sqlite3"
     with sqlite3.connect(database_path) as connection:
@@ -857,16 +1009,24 @@ def test_rebalance_bot_cycle_fills_after_dip_and_rebound_between_polls(monkeypat
             "SELECT COUNT(*) FROM paper_trades WHERE status = 'filled'"
         ).fetchone()[0]
 
-    assert filled_count == 1
+    assert filled_count == 0
 
 
 def test_trade_history_endpoint_returns_recorded_trades(monkeypatch, tmp_path) -> None:
     client = build_client(monkeypatch, tmp_path)
 
+    deposit_response = client.post(
+        "/api/paper-trading/deposits",
+        json={"amount_usd": 200, "user_id": "user-123", "user_name": "Test Trader"},
+    )
+
+    assert deposit_response.status_code == 200
+
     client.post(
         "/api/bots",
         json={
             "strategy": "grid",
+            "budget_usd": 150,
             "grid_config": {
                 "lower_price": 62000,
                 "upper_price": 72000,
@@ -897,10 +1057,18 @@ def test_trade_history_endpoint_returns_recorded_trades(monkeypatch, tmp_path) -
 def test_bot_history_tracks_multiple_active_bots(monkeypatch, tmp_path) -> None:
     client = build_client(monkeypatch, tmp_path)
 
+    deposit_response = client.post(
+        "/api/paper-trading/deposits",
+        json={"amount_usd": 200, "user_id": "user-123", "user_name": "Test Trader"},
+    )
+
+    assert deposit_response.status_code == 200
+
     first_response = client.post(
         "/api/bots",
         json={
             "strategy": "grid",
+            "budget_usd": 150,
             "grid_config": {
                 "lower_price": 62000,
                 "upper_price": 72000,
@@ -919,6 +1087,7 @@ def test_bot_history_tracks_multiple_active_bots(monkeypatch, tmp_path) -> None:
         "/api/bots",
         json={
             "strategy": "grid",
+            "budget_usd": 150,
             "grid_config": {
                 "lower_price": 63000,
                 "upper_price": 73000,
@@ -954,6 +1123,120 @@ def test_bot_history_tracks_multiple_active_bots(monkeypatch, tmp_path) -> None:
     assert history_payload["activeBots"][1]["name"].endswith("#01")
     assert history_payload["activeBots"][1]["status"] == "paper-running"
     assert history_payload["previousBots"] == []
+
+
+def test_stopped_bot_releases_btc_reserve_for_next_bot(monkeypatch, tmp_path) -> None:
+    app = build_app(monkeypatch, tmp_path)
+    snapshot_path = tmp_path / "state" / "market_snapshot.json"
+
+    write_shared_snapshot(
+        snapshot_path,
+        MarketSnapshot(
+            symbol="BTC/USDT",
+            price=100.0,
+            change_24h_pct=0.0,
+            volume_24h=0.0,
+            volatility_24h_pct=0.0,
+            trend="flat",
+        ),
+    )
+    app.create_bot(
+        StrategyType.INFINITY_GRID,
+        budget_usd=100,
+        user_id="user-123",
+        user_name="Test Trader",
+        infinity_config={
+            "reference_price": 100,
+            "spacing_pct": 10,
+            "order_size_usd": 20,
+            "levels_per_side": 2,
+        },
+    )
+    bot_id = app.paper_store.list_bot_instances(user_id="user-123")[0]["id"]
+
+    app.paper_store.mark_bot_stopped(bot_id=bot_id, timestamp=utc_timestamp())
+
+    account_state = app.paper_store.ensure_account(
+        user_id="user-123",
+        user_name="Test Trader",
+        timestamp=utc_timestamp(),
+    )
+    assert account_state["usd_balance"] == 30.0
+    assert account_state["btc_balance"] == 0.7
+
+    next_dashboard = app.create_bot(
+        StrategyType.REBALANCE,
+        budget_usd=100,
+        user_id="user-123",
+        user_name="Test Trader",
+        rebalance_config={
+            "target_btc_ratio": 0.5,
+            "rebalance_threshold_pct": 5.0,
+            "interval_minutes": 60,
+        },
+    )
+
+    assert next_dashboard["dashboard"]["availableReserveUsd"] == 0.0
+    assert len(next_dashboard["dashboard"]["activeStrategies"]) == 1
+
+
+def test_crashed_bot_releases_btc_reserve_for_next_bot(monkeypatch, tmp_path) -> None:
+    app = build_app(monkeypatch, tmp_path)
+    snapshot_path = tmp_path / "state" / "market_snapshot.json"
+
+    write_shared_snapshot(
+        snapshot_path,
+        MarketSnapshot(
+            symbol="BTC/USDT",
+            price=100.0,
+            change_24h_pct=0.0,
+            volume_24h=0.0,
+            volatility_24h_pct=0.0,
+            trend="flat",
+        ),
+    )
+    app.create_bot(
+        StrategyType.INFINITY_GRID,
+        budget_usd=100,
+        user_id="user-123",
+        user_name="Test Trader",
+        infinity_config={
+            "reference_price": 100,
+            "spacing_pct": 10,
+            "order_size_usd": 20,
+            "levels_per_side": 2,
+        },
+    )
+    bot_id = app.paper_store.list_bot_instances(user_id="user-123")[0]["id"]
+
+    app.paper_store.mark_bot_crashed(
+        bot_id=bot_id,
+        error="Simulated worker failure.",
+        timestamp=utc_timestamp(),
+    )
+
+    account_state = app.paper_store.ensure_account(
+        user_id="user-123",
+        user_name="Test Trader",
+        timestamp=utc_timestamp(),
+    )
+    assert account_state["usd_balance"] == 30.0
+    assert account_state["btc_balance"] == 0.7
+
+    next_dashboard = app.create_bot(
+        StrategyType.REBALANCE,
+        budget_usd=100,
+        user_id="user-123",
+        user_name="Test Trader",
+        rebalance_config={
+            "target_btc_ratio": 0.5,
+            "rebalance_threshold_pct": 5.0,
+            "interval_minutes": 60,
+        },
+    )
+
+    assert next_dashboard["dashboard"]["availableReserveUsd"] == 0.0
+    assert len(next_dashboard["dashboard"]["activeStrategies"]) == 1
 
 
 def test_deposit_endpoint_persists_balance_and_log(monkeypatch, tmp_path) -> None:

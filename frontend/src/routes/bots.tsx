@@ -154,7 +154,7 @@ function BotCard({
         </div>
       </div>
 
-      <div className="mt-6 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+      <div className="mt-6 grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
         <div className="rounded-xl border border-zinc-800 bg-zinc-950/70 px-4 py-3">
           <p className="text-xs uppercase tracking-[0.18em] text-zinc-500">Pair</p>
           <p className="mt-2 text-sm font-medium text-zinc-100">
@@ -166,8 +166,14 @@ function BotCard({
           <p className="mt-2 text-sm font-medium text-zinc-100">{bot.tradeCount}</p>
         </div>
         <div className="rounded-xl border border-zinc-800 bg-zinc-950/70 px-4 py-3">
-          <p className="text-xs uppercase tracking-[0.18em] text-zinc-500">Position value</p>
-          <p className="mt-2 text-sm font-medium text-zinc-100">{formatCurrency(bot.totalNotionalUsd)}</p>
+          <p className="text-xs uppercase tracking-[0.18em] text-zinc-500">Budget</p>
+          <p className="mt-2 text-sm font-medium text-zinc-100">{formatCurrency(bot.budgetUsd)}</p>
+        </div>
+        <div className="rounded-xl border border-zinc-800 bg-zinc-950/70 px-4 py-3">
+          <p className="text-xs uppercase tracking-[0.18em] text-zinc-500">Current equity</p>
+          <p className="mt-2 text-sm font-medium text-zinc-100">
+            {formatCurrency(bot.currentEquityUsd)}
+          </p>
         </div>
         <div className="rounded-xl border border-zinc-800 bg-zinc-950/70 px-4 py-3">
           <p className="text-xs uppercase tracking-[0.18em] text-zinc-500">Unrealized PnL</p>

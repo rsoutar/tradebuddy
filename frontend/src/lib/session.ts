@@ -58,6 +58,10 @@ export type ActiveStrategy = {
   tradeCount: number
   buyCount: number
   sellCount: number
+  budgetUsd: number
+  currentEquityUsd: number
+  availableUsd: number
+  btcBalance: number
   totalNotionalUsd: number
   unrealizedPnlUsd: number
   unrealizedPnlPct: number
@@ -80,6 +84,10 @@ export type BotRun = {
   tradeCount: number
   buyCount: number
   sellCount: number
+  budgetUsd: number
+  currentEquityUsd: number
+  availableUsd: number
+  btcBalance: number
   totalNotionalUsd: number
   unrealizedPnlUsd: number
   unrealizedPnlPct: number
@@ -177,6 +185,16 @@ export type ActivityEvent = {
 
 export type DashboardState = {
   capitalUsd: number
+  availableCashUsd: number
+  availableReserveUsd: number
+  availableBtc: number
+  allocatedCapitalUsd: number
+  profit24hUsd: number
+  profit24hPct: number
+  portfolioPerformance: Array<{
+    timestamp: string
+    equityUsd: number
+  }>
   activeStrategy: StrategyKey
   botStatus: 'idle' | 'paper-running'
   paperRunCount: number
@@ -683,6 +701,7 @@ export const runBacktest = createServerFn({ method: 'POST' }).handler(
 export const createBot = createServerFn({ method: 'POST' }).handler(async ({ data }) => {
   const input = (data ?? {}) as {
     strategy: StrategyKey
+    budgetUsd: number
     gridConfig?: GridBotInput
     rebalanceConfig?: RebalanceBotInput
     infinityConfig?: InfinityGridBotInput
@@ -702,6 +721,7 @@ export const createBot = createServerFn({ method: 'POST' }).handler(async ({ dat
       },
       body: JSON.stringify({
         strategy: input.strategy,
+        budget_usd: input.budgetUsd,
         grid_config: input.gridConfig
           ? {
               lower_price: input.gridConfig.lowerPrice,

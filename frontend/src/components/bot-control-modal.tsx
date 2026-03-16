@@ -67,8 +67,8 @@ function formatTimeAgo(timestamp?: string) {
 }
 
 function buildEstimatedNavSeries(bot: ControllableBot): BacktestEquityPoint[] {
-  const deployedCapital = Math.max(bot.totalNotionalUsd - bot.unrealizedPnlUsd, 0)
-  const currentNav = Math.max(bot.totalNotionalUsd, 0)
+  const deployedCapital = Math.max(bot.budgetUsd, 0)
+  const currentNav = Math.max(bot.currentEquityUsd, 0)
   const currentTimestamp = bot.updatedAt ?? bot.lastTradeAt ?? bot.startedAt
   const points: BacktestEquityPoint[] = [
     {
@@ -188,6 +188,10 @@ export function BotControlModal({
                 </div>
                 <div className="grid gap-3 text-sm text-zinc-400 sm:grid-cols-2">
                   <div>
+                    <p className="text-xs uppercase tracking-[0.18em] text-zinc-500">Budget</p>
+                    <p className="mt-2 font-medium text-zinc-100">{formatCurrency(bot.budgetUsd)}</p>
+                  </div>
+                  <div>
                     <p className="text-xs uppercase tracking-[0.18em] text-zinc-500">Unrealized</p>
                     <p
                       className={cx(
@@ -240,6 +244,12 @@ export function BotControlModal({
               ) : null}
 
               <div className="mt-5 grid gap-3">
+                <div className="rounded-xl border border-zinc-800/80 bg-zinc-950/70 px-4 py-3">
+                  <p className="text-xs uppercase tracking-[0.18em] text-zinc-500">Current equity</p>
+                  <p className="mt-2 text-sm font-medium text-zinc-100">
+                    {formatCurrency(bot.currentEquityUsd)}
+                  </p>
+                </div>
                 <div className="rounded-xl border border-zinc-800/80 bg-zinc-950/70 px-4 py-3">
                   <p className="text-xs uppercase tracking-[0.18em] text-zinc-500">Status</p>
                   <p className="mt-2 text-sm font-medium text-zinc-100">

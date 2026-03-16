@@ -2,12 +2,14 @@ import { useMemo, useState } from 'react'
 import type { FormEvent, ReactNode } from 'react'
 import { Link, createFileRoute } from '@tanstack/react-router'
 import { Icon } from '@iconify/react'
+import { BacktestEquityChart, type BacktestEquityPoint } from '../components/backtest-equity-chart'
 import { BotControlModal } from '../components/bot-control-modal'
 import { MarketConnectionBadge } from '../components/market-connection-badge'
 import { ProtectedMenuButton, ProtectedShell } from '../components/protected-shell'
 import { requireAuthenticatedViewer } from '../lib/protected-route'
 import type { ActiveStrategy, DashboardState, MarketConnectionState, MarketState, StrategyKey } from '../lib/session'
 import { createBot, depositPaperFunds, getDashboard, stopBot } from '../lib/session'
+import { useTheme } from '../lib/theme'
 
 const strategyLabels: Record<StrategyKey, string> = {
   grid: 'Grid Bot',
@@ -59,19 +61,25 @@ const currencyFormatter = new Intl.NumberFormat('en-US', {
   maximumFractionDigits: 2,
 })
 
-const compactCurrencyFormatter = new Intl.NumberFormat('en-US', {
-  style: 'currency',
-  currency: 'USD',
-  notation: 'compact',
-  maximumFractionDigits: 1,
-})
-
 const dateTimeFormatter = new Intl.DateTimeFormat('en-US', {
   month: 'short',
   day: 'numeric',
   hour: 'numeric',
   minute: '2-digit',
 })
+
+const btcFormatter = new Intl.NumberFormat('en-US', {
+  minimumFractionDigits: 4,
+  maximumFractionDigits: 8,
+})
+
+const chartLabelFormatter = new Intl.DateTimeFormat('en-US', {
+  month: 'short',
+  day: 'numeric',
+  hour: 'numeric',
+})
+
+const MIN_EFFECTIVE_ORDER_USD = 10
 
 export const Route = createFileRoute('/dashboard')({
   beforeLoad: async () => {
@@ -92,13 +100,21 @@ function formatCurrency(value: number) {
   return currencyFormatter.format(value)
 }
 
-function formatCompactCurrency(value: number) {
-  return compactCurrencyFormatter.format(value)
-}
-
 function formatPercent(value: number, digits = 2) {
   const sign = value > 0 ? '+' : ''
   return `${sign}${value.toFixed(digits)}%`
+}
+
+function formatBtc(value: number) {
+  return `${btcFormatter.format(value)} BTC`
+}
+
+type BudgetAssessment = {
+  isEnough: boolean
+  isReady: boolean
+  requiredBudgetUsd?: number
+  message: string
+  tone: 'neutral' | 'positive' | 'negative'
 }
 
 function formatTimeAgo(timestamp?: string) {
@@ -177,6 +193,170 @@ function infinityIndexBelow(referencePrice: number, spacingPct: number, price: n
   }
 
   return rawIndex
+}
+
+function buildBudgetAssessment({
+  strategy,
+  budgetUsd,
+  availableCashUsd,
+  marketPrice,
+  gridLowerPrice,
+  gridUpperPrice,
+  gridCount,
+  gridSpacing,
+  rebalanceTargetRatio,
+  rebalanceThreshold,
+  rebalanceInterval,
+  infinityReferencePrice,
+  infinitySpacingPct,
+  infinityOrderSizeUsd,
+  infinityLevelsPerSide,
+}: {
+  strategy: StrategyKey
+  budgetUsd?: number
+  availableCashUsd: number
+  marketPrice: number
+  gridLowerPrice?: number
+  gridUpperPrice?: number
+  gridCount?: number
+  gridSpacing?: number
+  rebalanceTargetRatio?: number
+  rebalanceThreshold?: number
+  rebalanceInterval?: number
+  infinityReferencePrice?: number
+  infinitySpacingPct?: number
+  infinityOrderSizeUsd?: number
+  infinityLevelsPerSide?: number
+}): BudgetAssessment {
+  if (!budgetUsd || budgetUsd <= 0) {
+    return {
+      isEnough: false,
+      isReady: false,
+      message: 'Enter a bot budget first to check whether this setup can launch.',
+      tone: 'neutral',
+    }
+  }
+
+  if (budgetUsd > availableCashUsd) {
+    return {
+      isEnough: false,
+      isReady: true,
+      requiredBudgetUsd: budgetUsd,
+      message: `This budget needs ${formatCurrency(budgetUsd)}, but only ${formatCurrency(availableCashUsd)} is available in reserve.`,
+      tone: 'negative',
+    }
+  }
+
+  if (strategy === 'grid') {
+    if (!gridLowerPrice || !gridUpperPrice || !gridCount || !gridSpacing || gridUpperPrice <= gridLowerPrice) {
+      return {
+        isEnough: false,
+        isReady: false,
+        message: 'Add a valid range, level count, and spacing to evaluate the grid budget.',
+        tone: 'neutral',
+      }
+    }
+
+    const levels = buildGridLevels(gridLowerPrice, gridUpperPrice, gridCount, gridSpacing)
+    const buyLevels = levels.filter((level) => level < marketPrice)
+    if (!buyLevels.length) {
+      return {
+        isEnough: false,
+        isReady: true,
+        message: 'This range sits above spot, so the bot has no buy levels below market to deploy the budget.',
+        tone: 'negative',
+      }
+    }
+
+    const requiredBudgetUsd = Number(((buyLevels.length * MIN_EFFECTIVE_ORDER_USD) / 0.45).toFixed(2))
+    return budgetUsd >= requiredBudgetUsd
+      ? {
+          isEnough: true,
+          isReady: true,
+          requiredBudgetUsd,
+          message: `Budget is sufficient. ${formatCurrency(budgetUsd)} covers ${buyLevels.length} live buy levels for this grid.`,
+          tone: 'positive',
+        }
+      : {
+          isEnough: false,
+          isReady: true,
+          requiredBudgetUsd,
+          message: `This grid needs at least ${formatCurrency(requiredBudgetUsd)} to seed those buy levels realistically.`,
+          tone: 'negative',
+        }
+  }
+
+  if (strategy === 'rebalance') {
+    if (
+      rebalanceTargetRatio == null
+      || rebalanceTargetRatio < 0
+      || rebalanceTargetRatio > 100
+      || rebalanceThreshold == null
+      || rebalanceThreshold <= 0
+      || rebalanceInterval == null
+      || rebalanceInterval <= 0
+    ) {
+      return {
+        isEnough: false,
+        isReady: false,
+        message: 'Add a valid target ratio, drift threshold, and check interval to evaluate the budget.',
+        tone: 'neutral',
+      }
+    }
+
+    const activeLegs = Number(rebalanceTargetRatio > 0) + Number(rebalanceTargetRatio < 100)
+    const requiredBudgetUsd = Math.max(MIN_EFFECTIVE_ORDER_USD, activeLegs * MIN_EFFECTIVE_ORDER_USD)
+    return budgetUsd >= requiredBudgetUsd
+      ? {
+          isEnough: true,
+          isReady: true,
+          requiredBudgetUsd,
+          message: `Budget is sufficient. The rebalance bot can start with ${formatCurrency(budgetUsd)} and hold the requested mix.`,
+          tone: 'positive',
+        }
+      : {
+          isEnough: false,
+          isReady: true,
+          requiredBudgetUsd,
+          message: `This rebalance setup needs at least ${formatCurrency(requiredBudgetUsd)} to split capital into the target allocation.`,
+          tone: 'negative',
+        }
+  }
+
+  if (
+    !infinityReferencePrice
+    || infinityReferencePrice <= 0
+    || !infinitySpacingPct
+    || infinitySpacingPct <= 0
+    || !infinityOrderSizeUsd
+    || infinityOrderSizeUsd <= 0
+    || !infinityLevelsPerSide
+    || infinityLevelsPerSide < 1
+  ) {
+    return {
+      isEnough: false,
+      isReady: false,
+      message: 'Add a valid reference price, spacing, order size, and level count to evaluate the budget.',
+      tone: 'neutral',
+    }
+  }
+
+  const requiredBudgetUsd = Number((infinityOrderSizeUsd * infinityLevelsPerSide * 2).toFixed(2))
+  return budgetUsd >= requiredBudgetUsd
+    ? {
+        isEnough: true,
+        isReady: true,
+        requiredBudgetUsd,
+        message: `Budget is sufficient. ${formatCurrency(budgetUsd)} can fund both sides of the configured infinity ladder.`,
+        tone: 'positive',
+      }
+    : {
+        isEnough: false,
+        isReady: true,
+        requiredBudgetUsd,
+        message: `This infinity ladder needs at least ${formatCurrency(requiredBudgetUsd)} to cover both sides of the configured levels.`,
+        tone: 'negative',
+      }
 }
 
 type LadderPreviewLevel = {
@@ -427,6 +607,7 @@ function MetricCard({
 }
 
 function DashboardPage() {
+  const { effectiveTheme } = useTheme()
   const loaderData = Route.useLoaderData()
   const [dashboard, setDashboard] = useState<DashboardState>(loaderData.dashboard)
   const [market, setMarket] = useState<MarketState>(loaderData.market)
@@ -443,6 +624,7 @@ function DashboardPage() {
   const [gridSpacing, setGridSpacing] = useState('2')
   const [isGridStopLossEnabled, setIsGridStopLossEnabled] = useState(false)
   const [gridStopLoss, setGridStopLoss] = useState('10')
+  const [botBudgetUsd, setBotBudgetUsd] = useState('')
   const [rebalanceTargetRatio, setRebalanceTargetRatio] = useState('50')
   const [rebalanceThreshold, setRebalanceThreshold] = useState('5')
   const [rebalanceInterval, setRebalanceInterval] = useState('60')
@@ -464,40 +646,35 @@ function DashboardPage() {
 
   const activeBots = dashboard.activeStrategies.length
   const alertCount = dashboard.events.filter((event) => event.tone !== 'neutral').length
-  const totalUnrealizedPnl = dashboard.activeStrategies.reduce(
-    (sum, strategy) => sum + strategy.unrealizedPnlUsd,
-    0,
-  )
   const totalTradeCount = dashboard.activeStrategies.reduce(
     (sum, strategy) => sum + strategy.tradeCount,
     0,
   )
-  const averageWinRate =
-    dashboard.bots.reduce((sum, bot) => sum + bot.winRatePct, 0) / Math.max(dashboard.bots.length, 1)
-
   const metricsData = {
     totalBalance: dashboard.capitalUsd,
-    balanceChange: 2.4,
-    profit24h: totalUnrealizedPnl,
+    availableCash: dashboard.availableCashUsd,
+    availableReserve: dashboard.availableReserveUsd,
+    availableBtc: dashboard.availableBtc,
+    allocatedCapital: dashboard.allocatedCapitalUsd,
+    balanceChange: dashboard.profit24hPct,
+    profit24h: dashboard.profit24hUsd,
     trades24h: totalTradeCount,
     activeBots,
     totalBots: Object.keys(strategyLabels).length,
-    winRate: averageWinRate,
-    winRateChange: -1.2,
   }
 
-  const chartData = [
-    { date: 'Nov 3', value: 30, positive: true },
-    { date: 'Nov 4', value: 45, positive: true },
-    { date: 'Nov 5', value: -15, positive: false },
-    { date: 'Nov 6', value: 20, positive: true },
-    { date: 'Nov 7', value: 60, positive: true },
-    { date: 'Nov 8', value: 55, positive: true },
-    { date: 'Nov 9', value: -25, positive: false },
-    { date: 'Nov 10', value: 40, positive: true },
-    { date: 'Nov 11', value: 70, positive: true },
-    { date: 'Nov 12', value: 85, positive: true },
-  ]
+  const portfolioChartData = useMemo<BacktestEquityPoint[]>(
+    () =>
+      dashboard.portfolioPerformance.map((point, index, all) => ({
+        label:
+          index === 0 || index === all.length - 1 || index % Math.max(Math.floor(all.length / 4), 1) === 0
+            ? chartLabelFormatter.format(new Date(point.timestamp))
+            : '',
+        timestamp: point.timestamp,
+        equity: point.equityUsd,
+      })),
+    [dashboard.portfolioPerformance],
+  )
 
   const activityLog = useMemo(
     () =>
@@ -637,6 +814,48 @@ function DashboardPage() {
       ],
     }
   }, [infinityLevelsPerSide, infinityReferencePrice, infinitySpacingPct, market.price])
+  const parsedBudgetUsd = useMemo(() => parsePositiveNumber(botBudgetUsd), [botBudgetUsd])
+  const botBudgetAssessment = useMemo(
+    () =>
+      buildBudgetAssessment({
+        strategy: selectedBotType,
+        budgetUsd: parsedBudgetUsd,
+        availableCashUsd: dashboard.availableReserveUsd,
+        marketPrice: market.price,
+        gridLowerPrice: parsePositiveNumber(gridLowerPrice),
+        gridUpperPrice: parsePositiveNumber(gridUpperPrice),
+        gridCount: parsePositiveInteger(gridCount),
+        gridSpacing: parsePositiveNumber(gridSpacing),
+        rebalanceTargetRatio: Number.parseFloat(rebalanceTargetRatio),
+        rebalanceThreshold: Number.parseFloat(rebalanceThreshold),
+        rebalanceInterval: Number.parseInt(rebalanceInterval, 10),
+        infinityReferencePrice: parsePositiveNumber(infinityReferencePrice),
+        infinitySpacingPct: parsePositiveNumber(infinitySpacingPct),
+        infinityOrderSizeUsd: parsePositiveNumber(infinityOrderSizeUsd),
+        infinityLevelsPerSide: parsePositiveInteger(infinityLevelsPerSide),
+      }),
+    [
+      dashboard.availableReserveUsd,
+      gridCount,
+      gridLowerPrice,
+      gridSpacing,
+      gridUpperPrice,
+      infinityLevelsPerSide,
+      infinityOrderSizeUsd,
+      infinityReferencePrice,
+      infinitySpacingPct,
+      market.price,
+      parsedBudgetUsd,
+      rebalanceInterval,
+      rebalanceTargetRatio,
+      rebalanceThreshold,
+      selectedBotType,
+    ],
+  )
+  const isCreateBudgetBlocked =
+    !parsedBudgetUsd
+    || parsedBudgetUsd > dashboard.availableReserveUsd
+    || (botBudgetAssessment.isReady && !botBudgetAssessment.isEnough)
 
   async function handleRefresh() {
     try {
@@ -687,6 +906,22 @@ function DashboardPage() {
       setActionError(undefined)
       setCreateBotError(undefined)
       setIsCreatingBot(true)
+      const budgetUsd = Number.parseFloat(botBudgetUsd)
+      if (!Number.isFinite(budgetUsd) || budgetUsd <= 0) {
+        setCreateBotError('Enter a bot budget greater than $0 before starting this strategy.')
+        return
+      }
+      if (budgetUsd > dashboard.availableReserveUsd) {
+        setCreateBotError(
+          `This bot needs ${formatCurrency(budgetUsd)}, but only ${formatCurrency(dashboard.availableReserveUsd)} is available in reserve.`,
+        )
+        return
+      }
+      if (botBudgetAssessment.isReady && !botBudgetAssessment.isEnough) {
+        setCreateBotError(botBudgetAssessment.message)
+        return
+      }
+
       let nextDashboard: DashboardState
       if (selectedBotType === 'grid') {
         const lowerPrice = Number.parseFloat(gridLowerPrice)
@@ -727,6 +962,7 @@ function DashboardPage() {
           // @ts-ignore
           data: {
             strategy: 'grid',
+            budgetUsd,
             gridConfig: {
               lowerPrice,
               upperPrice,
@@ -761,6 +997,7 @@ function DashboardPage() {
           // @ts-ignore
           data: {
             strategy: 'rebalance',
+            budgetUsd,
             rebalanceConfig: {
               targetBtcRatio: targetRatioPct / 100,
               rebalanceThresholdPct: thresholdPct,
@@ -795,6 +1032,7 @@ function DashboardPage() {
           // @ts-ignore
           data: {
             strategy: 'infinity-grid',
+            budgetUsd,
             infinityConfig: {
               referencePrice,
               spacingPct,
@@ -813,6 +1051,7 @@ function DashboardPage() {
       setGridSpacing('2')
       setIsGridStopLossEnabled(false)
       setGridStopLoss('10')
+      setBotBudgetUsd('')
       setRebalanceTargetRatio('50')
       setRebalanceThreshold('5')
       setRebalanceInterval('60')
@@ -888,8 +1127,24 @@ function DashboardPage() {
             <MetricCard
               change={
                 <>
-                  <span className="flex items-center rounded bg-emerald-400/10 px-1.5 py-0.5 text-xs font-normal text-emerald-400">
-                    <Icon icon="solar:arrow-right-up-linear" width={12} height={12} className="mr-0.5" />
+                  <span
+                    className={cx(
+                      'flex items-center rounded px-1.5 py-0.5 text-xs font-normal',
+                      metricsData.balanceChange >= 0
+                        ? 'bg-emerald-400/10 text-emerald-400'
+                        : 'bg-rose-400/10 text-rose-400',
+                    )}
+                  >
+                    <Icon
+                      icon={
+                        metricsData.balanceChange >= 0
+                          ? 'solar:arrow-right-up-linear'
+                          : 'solar:arrow-right-down-linear'
+                      }
+                      width={12}
+                      height={12}
+                      className="mr-0.5"
+                    />
                     {formatPercent(metricsData.balanceChange)}
                   </span>
                   <span className="text-xs font-normal text-zinc-500">vs last 24h</span>
@@ -910,11 +1165,20 @@ function DashboardPage() {
                   Deposit
                 </button>
               }
+              footer={
+                <span className="text-xs font-normal text-zinc-500">
+                  Reserve value {formatCurrency(metricsData.availableReserve)} • Idle USD {formatCurrency(metricsData.availableCash)}
+                </span>
+              }
               value={formatCurrency(metricsData.totalBalance)}
             />
             <MetricCard
               accent={metricsData.profit24h >= 0 ? 'positive' : 'negative'}
-              footer={<span className="text-xs font-normal text-zinc-500">{metricsData.trades24h} trades executed</span>}
+              footer={
+                <span className="text-xs font-normal text-zinc-500">
+                  {metricsData.trades24h} trades executed • {activeBots} bot{activeBots === 1 ? '' : 's'} contributing
+                </span>
+              }
               icon="solar:graph-up-linear"
               label="24h Profit"
               value={`${metricsData.profit24h > 0 ? '+' : ''}${formatCurrency(metricsData.profit24h)}`}
@@ -932,23 +1196,14 @@ function DashboardPage() {
               value={null}
             />
             <MetricCard
-              change={
-                <>
-                  <span className="flex items-center rounded bg-rose-400/10 px-1.5 py-0.5 text-xs font-normal text-rose-400">
-                    <Icon
-                      icon="solar:arrow-right-down-linear"
-                      width={12}
-                      height={12}
-                      className="mr-0.5"
-                    />
-                    {Math.abs(metricsData.winRateChange).toFixed(1)}%
-                  </span>
-                  <span className="text-xs font-normal text-zinc-500">vs previous 30d</span>
-                </>
+              footer={
+                <span className="text-xs font-normal text-zinc-500">
+                  BTC sitting in reserve and ready for another bot
+                </span>
               }
-              icon="solar:target-linear"
-              label="Win Rate (30d)"
-              value={`${metricsData.winRate.toFixed(1)}%`}
+              icon="solar:bitcoin-circle-linear"
+              label="Remain BTC"
+              value={formatBtc(metricsData.availableBtc)}
             />
           </div>
 
@@ -980,59 +1235,18 @@ function DashboardPage() {
               </div>
             </div>
 
-            <div className="relative h-64 p-5">
-              <div className="absolute bottom-8 left-5 top-5 z-0 flex flex-col justify-between text-xs font-normal text-zinc-600">
-                <span>+$2k</span>
-                <span>+$1k</span>
-                <span>0</span>
-                <span>-$1k</span>
-              </div>
-
-              <div className="pointer-events-none absolute bottom-10 left-14 right-5 top-6 z-0 flex flex-col justify-between">
-                <div className="w-full border-t border-dashed border-zinc-800/30" />
-                <div className="w-full border-t border-dashed border-zinc-800/30" />
-                <div className="w-full border-t border-zinc-700/50" />
-                <div className="w-full border-t border-dashed border-zinc-800/30" />
-              </div>
-
-              <div className="relative z-10 ml-12 mt-2 flex h-full items-end justify-between gap-1 pb-6 sm:gap-2">
-                {chartData.map((data) => (
-                  <div
-                    className={cx(
-                      'group relative w-full cursor-crosshair rounded-t-sm border transition-colors',
-                      data.positive
-                        ? 'border-emerald-500/30 bg-emerald-500/20 hover:bg-emerald-500/40'
-                        : 'mt-auto self-start border-rose-500/30 bg-rose-500/20 hover:bg-rose-500/40',
-                    )}
-                    key={data.date}
-                    style={
-                      data.positive
-                        ? { height: `${data.value}%` }
-                        : {
-                            height: `${Math.abs(data.value)}%`,
-                            transform: 'translateY(100%) scaleY(-1)',
-                            transformOrigin: 'top',
-                          }
-                    }
-                    title={`${data.date}: ${data.positive ? '+' : '-'}${formatCompactCurrency(
-                      Math.abs(data.value) * 20,
-                    )}`}
-                  >
-                    {data.date === 'Nov 12' ? (
-                      <div className="pointer-events-none absolute -top-10 left-1/2 hidden -translate-x-1/2 whitespace-nowrap rounded border border-zinc-700 bg-zinc-800 px-2 py-1 text-xs text-zinc-100 opacity-0 transition-opacity group-hover:block group-hover:opacity-100">
-                        Nov 12: +$1,120
-                      </div>
-                    ) : null}
-                  </div>
-                ))}
-              </div>
-
-              <div className="absolute bottom-0 left-0 right-5 ml-12 flex justify-between pb-2 text-xs font-normal text-zinc-600">
-                <span>Nov 3</span>
-                <span>Nov 6</span>
-                <span>Nov 9</span>
-                <span>Nov 12</span>
-              </div>
+            <div className="h-72 p-5">
+              {portfolioChartData.length ? (
+                <BacktestEquityChart
+                  className="h-full"
+                  data={portfolioChartData}
+                  isLightTheme={effectiveTheme === 'light'}
+                />
+              ) : (
+                <div className="flex h-full items-center justify-center rounded-2xl border border-dashed border-zinc-800 bg-zinc-950/70 text-sm text-zinc-500">
+                  Portfolio history will appear after the first balance snapshot is recorded.
+                </div>
+              )}
             </div>
           </div>
 
@@ -1109,6 +1323,9 @@ function DashboardPage() {
                                 <div className="text-zinc-300">{bot.strategyLabel}</div>
                                 <div className="max-w-xs truncate text-xs text-zinc-500">
                                   {bot.configSummary}
+                                </div>
+                                <div className="mt-1 text-xs text-zinc-500">
+                                  Budget {formatCurrency(bot.budgetUsd)} • Equity {formatCurrency(bot.currentEquityUsd)}
                                 </div>
                               </td>
                               <td className="px-5 py-4 text-right">
@@ -1317,6 +1534,45 @@ function DashboardPage() {
                       </p>
                     </div>
 
+                    <div className="grid gap-4 sm:grid-cols-[1fr_1.1fr]">
+                      <label className="block">
+                        <span className="mb-2 block text-sm font-medium text-zinc-300">Bot budget (USD)</span>
+                        <input
+                          className="w-full rounded-xl border border-zinc-800 bg-zinc-900/80 px-4 py-3 text-zinc-100 outline-none transition placeholder:text-zinc-600 focus:border-emerald-400/50 focus:ring-1 focus:ring-emerald-400/50"
+                          inputMode="decimal"
+                          min="0.01"
+                          step="0.01"
+                          placeholder={dashboard.availableReserveUsd.toFixed(2)}
+                          type="number"
+                          value={botBudgetUsd}
+                          onChange={(event) => setBotBudgetUsd(event.target.value)}
+                        />
+                        <span className="mt-2 block text-xs text-zinc-500">
+                          Available reserve: {formatCurrency(dashboard.availableReserveUsd)}
+                        </span>
+                      </label>
+                      <div
+                        className={cx(
+                          'rounded-2xl border px-4 py-3 text-sm leading-6',
+                          botBudgetAssessment.tone === 'positive'
+                            ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-200'
+                            : botBudgetAssessment.tone === 'negative'
+                              ? 'border-rose-500/30 bg-rose-500/10 text-rose-200'
+                              : 'border-zinc-800 bg-zinc-900/60 text-zinc-400',
+                        )}
+                      >
+                        <p className="text-xs font-medium uppercase tracking-[0.24em] opacity-80">
+                          Budget check
+                        </p>
+                        <p className="mt-2">{botBudgetAssessment.message}</p>
+                        {botBudgetAssessment.requiredBudgetUsd ? (
+                          <p className="mt-2 text-xs opacity-80">
+                            Minimum realistic budget: {formatCurrency(botBudgetAssessment.requiredBudgetUsd)}
+                          </p>
+                        ) : null}
+                      </div>
+                    </div>
+
                     <div className="grid gap-4 sm:grid-cols-2">
                       <label className="block">
                         <span className="mb-2 block text-sm font-medium text-zinc-300">Lower price</span>
@@ -1442,7 +1698,7 @@ function DashboardPage() {
                       </button>
                       <button
                         className="rounded-xl bg-emerald-400 px-4 py-2 text-sm font-medium text-zinc-950 transition hover:bg-emerald-300 disabled:cursor-not-allowed disabled:bg-emerald-400/60"
-                        disabled={isCreatingBot}
+                        disabled={isCreatingBot || isCreateBudgetBlocked}
                         type="submit"
                       >
                         {isCreatingBot ? 'Starting bot...' : 'Start bot'}
@@ -1462,6 +1718,45 @@ function DashboardPage() {
                         The bot will monitor BTC exposure against your target mix and plan a paper
                         trade whenever drift breaches the threshold.
                       </p>
+                    </div>
+
+                    <div className="grid gap-4 sm:grid-cols-[1fr_1.1fr]">
+                      <label className="block">
+                        <span className="mb-2 block text-sm font-medium text-zinc-300">Bot budget (USD)</span>
+                        <input
+                          className="w-full rounded-xl border border-zinc-800 bg-zinc-900/80 px-4 py-3 text-zinc-100 outline-none transition placeholder:text-zinc-600 focus:border-amber-400/50 focus:ring-1 focus:ring-amber-400/50"
+                          inputMode="decimal"
+                          min="0.01"
+                          step="0.01"
+                          placeholder={dashboard.availableReserveUsd.toFixed(2)}
+                          type="number"
+                          value={botBudgetUsd}
+                          onChange={(event) => setBotBudgetUsd(event.target.value)}
+                        />
+                        <span className="mt-2 block text-xs text-zinc-500">
+                          Available reserve: {formatCurrency(dashboard.availableReserveUsd)}
+                        </span>
+                      </label>
+                      <div
+                        className={cx(
+                          'rounded-2xl border px-4 py-3 text-sm leading-6',
+                          botBudgetAssessment.tone === 'positive'
+                            ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-200'
+                            : botBudgetAssessment.tone === 'negative'
+                              ? 'border-rose-500/30 bg-rose-500/10 text-rose-200'
+                              : 'border-zinc-800 bg-zinc-900/60 text-zinc-400',
+                        )}
+                      >
+                        <p className="text-xs font-medium uppercase tracking-[0.24em] opacity-80">
+                          Budget check
+                        </p>
+                        <p className="mt-2">{botBudgetAssessment.message}</p>
+                        {botBudgetAssessment.requiredBudgetUsd ? (
+                          <p className="mt-2 text-xs opacity-80">
+                            Minimum realistic budget: {formatCurrency(botBudgetAssessment.requiredBudgetUsd)}
+                          </p>
+                        ) : null}
+                      </div>
                     </div>
 
                     <div className="grid gap-4 sm:grid-cols-2">
@@ -1532,7 +1827,7 @@ function DashboardPage() {
                       </button>
                       <button
                         className="rounded-xl bg-amber-300 px-4 py-2 text-sm font-medium text-zinc-950 transition hover:bg-amber-200 disabled:cursor-not-allowed disabled:bg-amber-300/60"
-                        disabled={isCreatingBot}
+                        disabled={isCreatingBot || isCreateBudgetBlocked}
                         type="submit"
                       >
                         {isCreatingBot ? 'Starting bot...' : 'Start bot'}
@@ -1553,6 +1848,45 @@ function DashboardPage() {
                         price, buying below market, selling above market, and re-arming the
                         opposite side after each fill.
                       </p>
+                    </div>
+
+                    <div className="grid gap-4 sm:grid-cols-[1fr_1.1fr]">
+                      <label className="block">
+                        <span className="mb-2 block text-sm font-medium text-zinc-300">Bot budget (USD)</span>
+                        <input
+                          className="w-full rounded-xl border border-zinc-800 bg-zinc-900/80 px-4 py-3 text-zinc-100 outline-none transition placeholder:text-zinc-600 focus:border-sky-400/50 focus:ring-1 focus:ring-sky-400/50"
+                          inputMode="decimal"
+                          min="0.01"
+                          step="0.01"
+                          placeholder={dashboard.availableReserveUsd.toFixed(2)}
+                          type="number"
+                          value={botBudgetUsd}
+                          onChange={(event) => setBotBudgetUsd(event.target.value)}
+                        />
+                        <span className="mt-2 block text-xs text-zinc-500">
+                          Available reserve: {formatCurrency(dashboard.availableReserveUsd)}
+                        </span>
+                      </label>
+                      <div
+                        className={cx(
+                          'rounded-2xl border px-4 py-3 text-sm leading-6',
+                          botBudgetAssessment.tone === 'positive'
+                            ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-200'
+                            : botBudgetAssessment.tone === 'negative'
+                              ? 'border-rose-500/30 bg-rose-500/10 text-rose-200'
+                              : 'border-zinc-800 bg-zinc-900/60 text-zinc-400',
+                        )}
+                      >
+                        <p className="text-xs font-medium uppercase tracking-[0.24em] opacity-80">
+                          Budget check
+                        </p>
+                        <p className="mt-2">{botBudgetAssessment.message}</p>
+                        {botBudgetAssessment.requiredBudgetUsd ? (
+                          <p className="mt-2 text-xs opacity-80">
+                            Minimum realistic budget: {formatCurrency(botBudgetAssessment.requiredBudgetUsd)}
+                          </p>
+                        ) : null}
+                      </div>
                     </div>
 
                     <div className="grid gap-4 sm:grid-cols-2">
@@ -1637,7 +1971,7 @@ function DashboardPage() {
                       </button>
                       <button
                         className="rounded-xl bg-sky-300 px-4 py-2 text-sm font-medium text-zinc-950 transition hover:bg-sky-200 disabled:cursor-not-allowed disabled:bg-sky-300/60"
-                        disabled={isCreatingBot}
+                        disabled={isCreatingBot || isCreateBudgetBlocked}
                         type="submit"
                       >
                         {isCreatingBot ? 'Starting bot...' : 'Start bot'}
