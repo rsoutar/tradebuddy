@@ -4,7 +4,13 @@ from dataclasses import asdict, dataclass
 from datetime import datetime, timedelta, timezone
 from math import inf
 
-from trading_bot.models import GridBotConfig, HistoricalCandle, OrderSide, StrategyType
+from trading_bot.models import (
+    GridBotConfig,
+    HistoricalCandle,
+    OrderSide,
+    RebalanceBotConfig,
+    StrategyType,
+)
 from trading_bot.services.historical_data import BinanceHistoricalKlineLoader
 
 
@@ -52,6 +58,7 @@ class BacktestResult:
         return {
             "strategy": self.strategy,
             "periodLabel": self.period_label,
+            "startedAt": self.started_at,
             "roiPct": self.roi_pct,
             "maxDrawdownPct": self.max_drawdown_pct,
             "profitFactor": self.profit_factor,
@@ -68,6 +75,257 @@ class BacktestResult:
             "warnings": self.warnings,
             "tradeLog": self.trade_log,
         }
+
+
+class RebalanceBacktestRunner:
+    def __init__(
+        self,
+        historical_loader: BinanceHistoricalKlineLoader,
+        *,
+        fee_rate: float = DEFAULT_GRID_FEE_RATE,
+        slippage_rate: float = DEFAULT_GRID_SLIPPAGE_RATE,
+    ) -> None:
+        self._historical_loader = historical_loader
+        self._fee_rate = fee_rate
+        self._slippage_rate = slippage_rate
+
+    def run(
+        self,
+        config: RebalanceBotConfig,
+        *,
+        initial_capital_usd: float,
+        start: datetime | None = None,
+        end: datetime | None = None,
+        completed_at: datetime | None = None,
+    ) -> BacktestResult:
+        config.validate()
+        candles = self._historical_loader.load_candles(start=start, end=end)
+        if not candles:
+            raise ValueError("No historical candles available for the requested backtest window.")
+
+        capital = round(initial_capital_usd, 2)
+        usdt_balance = capital
+        btc_balance = 0.0
+        inventory_lots: list[tuple[float, float]] = []
+        realized_pnls: list[float] = []
+        trade_log: list[BacktestTrade] = []
+        warnings: list[str] = []
+        equity_curve: list[float] = [capital]
+        interval_seconds = config.interval_minutes * 60
+        last_rebalance_at: datetime | None = None
+        final_mark_price = candles[0].open
+        final_timestamp = candles[0].open_time
+
+        for candle in candles:
+            should_rebalance = (
+                last_rebalance_at is None
+                or (candle.close_time - last_rebalance_at).total_seconds() >= interval_seconds
+            )
+            if should_rebalance:
+                result = self._execute_rebalance(
+                    candle=candle,
+                    config=config,
+                    usdt_balance=usdt_balance,
+                    btc_balance=btc_balance,
+                    inventory_lots=inventory_lots,
+                )
+                usdt_balance = result["usdt_balance"]
+                btc_balance = result["btc_balance"]
+                trade = result.get("trade")
+                if isinstance(trade, BacktestTrade):
+                    trade_log.append(trade)
+                realized_pnl = result.get("realized_pnl")
+                if isinstance(realized_pnl, float):
+                    realized_pnls.append(realized_pnl)
+                last_rebalance_at = candle.close_time
+
+            equity_curve.append(usdt_balance + (btc_balance * candle.close))
+            final_mark_price = candle.close
+            final_timestamp = candle.close_time
+
+        final_equity = round(usdt_balance + (btc_balance * final_mark_price), 2)
+        completed_at = completed_at or datetime.now(timezone.utc)
+        gross_profit = sum(pnl for pnl in realized_pnls if pnl > 0)
+        gross_loss = abs(sum(pnl for pnl in realized_pnls if pnl < 0))
+        winning_trades = sum(1 for pnl in realized_pnls if pnl > 0)
+        closed_trades = len(realized_pnls)
+        duration_days = max(
+            (final_timestamp - candles[0].open_time).total_seconds() / 86_400,
+            1 / 24,
+        )
+
+        if not trade_log:
+            warnings.append(
+                "Portfolio drift stayed within the configured threshold for the entire replay window."
+            )
+
+        return BacktestResult(
+            strategy=StrategyType.REBALANCE.value,
+            period_label=self._format_period_label(candles[0].open_time, final_timestamp),
+            started_at=candles[0].open_time.isoformat(),
+            completed_at=completed_at.isoformat(),
+            roi_pct=round(((final_equity / capital) - 1) * 100, 2),
+            max_drawdown_pct=round(self._max_drawdown_pct(equity_curve), 2),
+            profit_factor=round(self._profit_factor(gross_profit, gross_loss), 2),
+            win_rate_pct=round((winning_trades / closed_trades) * 100, 1) if closed_trades else 0.0,
+            trades=len(trade_log),
+            annualized_pct=round(self._annualized_pct(capital, final_equity, duration_days), 2),
+            start_equity_usd=capital,
+            final_equity_usd=final_equity,
+            fee_rate=self._fee_rate,
+            slippage_rate=self._slippage_rate,
+            stop_loss_triggered=False,
+            upper_price_stop_triggered=False,
+            warnings=warnings,
+            trade_log=[self._serialize_trade(trade) for trade in trade_log],
+        )
+
+    def default_window(self) -> tuple[datetime, datetime]:
+        archives = self._historical_loader.available_archives()
+        if not archives:
+            raise ValueError("No historical archives are available for backtesting.")
+        latest_candle = self._historical_loader._iter_archive_rows(archives[-1])[-1]
+        end = latest_candle.open_time + timedelta(minutes=15)
+        start = end - timedelta(days=DEFAULT_GRID_LOOKBACK_DAYS)
+        return start, end
+
+    def _execute_rebalance(
+        self,
+        *,
+        candle: HistoricalCandle,
+        config: RebalanceBotConfig,
+        usdt_balance: float,
+        btc_balance: float,
+        inventory_lots: list[tuple[float, float]],
+    ) -> dict[str, object]:
+        mark_price = candle.close
+        portfolio_value = usdt_balance + (btc_balance * mark_price)
+        if portfolio_value <= 0:
+            return {"usdt_balance": usdt_balance, "btc_balance": btc_balance}
+
+        current_btc_value = btc_balance * mark_price
+        current_ratio = current_btc_value / portfolio_value
+        drift = config.target_btc_ratio - current_ratio
+        threshold = config.rebalance_threshold_pct / 100
+        if abs(drift) < threshold:
+            return {"usdt_balance": usdt_balance, "btc_balance": btc_balance}
+
+        target_btc_value = portfolio_value * config.target_btc_ratio
+        adjustment_value = target_btc_value - current_btc_value
+        side = OrderSide.BUY if adjustment_value > 0 else OrderSide.SELL
+        execution_price = round(
+            mark_price * (1 + self._slippage_rate if side is OrderSide.BUY else 1 - self._slippage_rate),
+            2,
+        )
+        if execution_price <= 0:
+            return {"usdt_balance": usdt_balance, "btc_balance": btc_balance}
+
+        target_notional = abs(adjustment_value)
+        if side is OrderSide.BUY:
+            gross_cost = min(target_notional, usdt_balance / (1 + self._fee_rate))
+            amount = round(gross_cost / execution_price, 6)
+            if amount <= 0:
+                return {"usdt_balance": usdt_balance, "btc_balance": btc_balance}
+            gross_cost = amount * execution_price
+            fee_usd = gross_cost * self._fee_rate
+            total_cost = gross_cost + fee_usd
+            if total_cost > usdt_balance:
+                return {"usdt_balance": usdt_balance, "btc_balance": btc_balance}
+            updated_usdt = round(usdt_balance - total_cost, 8)
+            updated_btc = round(btc_balance + amount, 8)
+            inventory_lots.append((amount, total_cost / amount))
+            return {
+                "usdt_balance": updated_usdt,
+                "btc_balance": updated_btc,
+                "trade": BacktestTrade(
+                    timestamp=candle.close_time,
+                    side=OrderSide.BUY.value,
+                    level=round(mark_price, 2),
+                    execution_price=execution_price,
+                    amount=amount,
+                    notional_usd=round(gross_cost, 2),
+                    fee_usd=round(fee_usd, 2),
+                    realized_pnl_usd=None,
+                    reason=(
+                        f"Rebalanced toward {config.target_btc_ratio * 100:.0f}% BTC after "
+                        f"{abs(drift) * 100:.2f}% drift."
+                    ),
+                ),
+            }
+
+        amount = round(min(target_notional / execution_price, btc_balance), 6)
+        if amount <= 0:
+            return {"usdt_balance": usdt_balance, "btc_balance": btc_balance}
+        gross_proceeds = amount * execution_price
+        fee_usd = gross_proceeds * self._fee_rate
+        net_proceeds = gross_proceeds - fee_usd
+        cost_basis = self._consume_inventory(inventory_lots, amount)
+        realized_pnl = round(net_proceeds - cost_basis, 8)
+        return {
+            "usdt_balance": round(usdt_balance + net_proceeds, 8),
+            "btc_balance": round(btc_balance - amount, 8),
+            "realized_pnl": realized_pnl,
+            "trade": BacktestTrade(
+                timestamp=candle.close_time,
+                side=OrderSide.SELL.value,
+                level=round(mark_price, 2),
+                execution_price=execution_price,
+                amount=amount,
+                notional_usd=round(gross_proceeds, 2),
+                fee_usd=round(fee_usd, 2),
+                realized_pnl_usd=round(realized_pnl, 2),
+                reason=(
+                    f"Rebalanced toward {config.target_btc_ratio * 100:.0f}% BTC after "
+                    f"{abs(drift) * 100:.2f}% drift."
+                ),
+            ),
+        }
+
+    def _consume_inventory(self, inventory_lots: list[tuple[float, float]], amount: float) -> float:
+        remaining = amount
+        cost_basis = 0.0
+        while remaining > 0 and inventory_lots:
+            lot_amount, lot_cost = inventory_lots[0]
+            consumed = min(lot_amount, remaining)
+            cost_basis += consumed * lot_cost
+            lot_amount -= consumed
+            remaining -= consumed
+            if lot_amount <= 1e-9:
+                inventory_lots.pop(0)
+            else:
+                inventory_lots[0] = (lot_amount, lot_cost)
+        return cost_basis
+
+    def _format_period_label(self, start: datetime, end: datetime) -> str:
+        return f"{start:%Y-%m-%d} to {end:%Y-%m-%d}"
+
+    def _max_drawdown_pct(self, equity_curve: list[float]) -> float:
+        peak = equity_curve[0]
+        max_drawdown = 0.0
+        for equity in equity_curve:
+            peak = max(peak, equity)
+            if peak <= 0:
+                continue
+            drawdown = ((peak - equity) / peak) * 100
+            max_drawdown = max(max_drawdown, drawdown)
+        return max_drawdown
+
+    def _profit_factor(self, gross_profit: float, gross_loss: float) -> float:
+        if gross_loss == 0:
+            return gross_profit if gross_profit > 0 else 0.0
+        return gross_profit / gross_loss
+
+    def _annualized_pct(self, initial_equity: float, final_equity: float, duration_days: float) -> float:
+        if initial_equity <= 0 or final_equity <= 0:
+            return -100.0
+        if duration_days < 1:
+            return ((final_equity / initial_equity) - 1) * 100
+        return (((final_equity / initial_equity) ** (365 / duration_days)) - 1) * 100
+
+    def _serialize_trade(self, trade: BacktestTrade) -> dict[str, object]:
+        payload = asdict(trade)
+        payload["timestamp"] = trade.timestamp.isoformat()
+        return payload
 
 
 class GridBacktestRunner:

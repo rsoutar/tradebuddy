@@ -32,14 +32,22 @@ class GridConfigRequest(BaseModel):
     stop_loss_pct: Optional[float] = Field(default=None, gt=0)
 
 
+class RebalanceConfigRequest(BaseModel):
+    target_btc_ratio: float = Field(ge=0, le=1)
+    rebalance_threshold_pct: float = Field(gt=0)
+    interval_minutes: int = Field(gt=0)
+
+
 class CreateBotRequest(UserScopedRequest):
     strategy: StrategyType
     grid_config: Optional[GridConfigRequest] = None
+    rebalance_config: Optional[RebalanceConfigRequest] = None
 
 
 class BacktestRequest(UserScopedRequest):
     strategy: StrategyType
     grid_config: Optional[GridConfigRequest] = None
+    rebalance_config: Optional[RebalanceConfigRequest] = None
     start_at: Optional[datetime] = None
     end_at: Optional[datetime] = None
     initial_capital_usd: Optional[float] = Field(default=None, gt=0)
@@ -127,6 +135,9 @@ def create_api(trading_app: Optional[TradingBotApp] = None) -> FastAPI:
                 user_id=payload.user_id,
                 user_name=payload.user_name,
                 grid_config=payload.grid_config.model_dump() if payload.grid_config else None,
+                rebalance_config=(
+                    payload.rebalance_config.model_dump() if payload.rebalance_config else None
+                ),
             )
         except ValueError as error:
             raise HTTPException(status_code=400, detail=str(error)) from error
@@ -161,6 +172,9 @@ def create_api(trading_app: Optional[TradingBotApp] = None) -> FastAPI:
                 user_id=payload.user_id,
                 user_name=payload.user_name,
                 grid_config=payload.grid_config.model_dump() if payload.grid_config else None,
+                rebalance_config=(
+                    payload.rebalance_config.model_dump() if payload.rebalance_config else None
+                ),
                 start_at=payload.start_at,
                 end_at=payload.end_at,
                 initial_capital_usd=payload.initial_capital_usd,

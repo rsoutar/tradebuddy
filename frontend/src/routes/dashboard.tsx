@@ -33,12 +33,12 @@ const botCatalog: Array<{
   },
   {
     key: 'rebalance',
-    eyebrow: 'Coming soon',
+    eyebrow: 'Ready now',
     description: 'Keep BTC allocation on target with scheduled drift checks and auto-adjustments.',
     icon: 'solar:refresh-circle-linear',
     accent:
       'border-amber-400/20 bg-[radial-gradient(circle_at_top,_rgba(245,158,11,0.12),_transparent_70%)]',
-    availableNow: false,
+    availableNow: true,
   },
   {
     key: 'infinity-grid',
@@ -235,6 +235,9 @@ function DashboardPage() {
   const [gridSpacing, setGridSpacing] = useState('2')
   const [isGridStopLossEnabled, setIsGridStopLossEnabled] = useState(false)
   const [gridStopLoss, setGridStopLoss] = useState('10')
+  const [rebalanceTargetRatio, setRebalanceTargetRatio] = useState('50')
+  const [rebalanceThreshold, setRebalanceThreshold] = useState('5')
+  const [rebalanceInterval, setRebalanceInterval] = useState('60')
   const [depositAmount, setDepositAmount] = useState('')
   const [depositError, setDepositError] = useState<string>()
   const [isDepositing, setIsDepositing] = useState(false)
@@ -355,63 +358,96 @@ function DashboardPage() {
   async function handleCreateBotSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
 
-    if (selectedBotType !== 'grid') {
-      setCreateBotError('Grid Bot is the first live flow. Rebalance and Infinity Grid are next.')
-      return
-    }
-
-    const lowerPrice = Number.parseFloat(gridLowerPrice)
-    const upperPrice = Number.parseFloat(gridUpperPrice)
-    const gridLevelCount = Number.parseInt(gridCount, 10)
-    const spacingPct = Number.parseFloat(gridSpacing)
-    const stopLossPct = isGridStopLossEnabled ? Number.parseFloat(gridStopLoss) : undefined
-
-    if (!Number.isFinite(lowerPrice) || !Number.isFinite(upperPrice)) {
-      setCreateBotError('Enter both lower and upper prices for the grid range.')
-      return
-    }
-
-    if (upperPrice <= lowerPrice) {
-      setCreateBotError('Upper price must be greater than the lower price.')
-      return
-    }
-
-    if (!Number.isInteger(gridLevelCount) || gridLevelCount < 2) {
-      setCreateBotError('Grid levels must be a whole number greater than or equal to 2.')
-      return
-    }
-
-    if (!Number.isFinite(spacingPct) || spacingPct <= 0) {
-      setCreateBotError('Grid spacing must be greater than 0.')
-      return
-    }
-
-    if (
-      isGridStopLossEnabled
-      && (!Number.isFinite(stopLossPct) || (stopLossPct ?? 0) <= 0)
-    ) {
-      setCreateBotError('Stop-loss percentage must be greater than 0.')
-      return
-    }
-
     try {
       setActionError(undefined)
       setCreateBotError(undefined)
       setIsCreatingBot(true)
-      const nextDashboard = await createBot({
-        // @ts-ignore
-        data: {
-          strategy: 'grid',
-          gridConfig: {
-            lowerPrice,
-            upperPrice,
-            gridCount: gridLevelCount,
-            spacingPct,
-            stopLossEnabled: isGridStopLossEnabled,
-            stopLossPct,
+      let nextDashboard: DashboardState
+      if (selectedBotType === 'grid') {
+        const lowerPrice = Number.parseFloat(gridLowerPrice)
+        const upperPrice = Number.parseFloat(gridUpperPrice)
+        const gridLevelCount = Number.parseInt(gridCount, 10)
+        const spacingPct = Number.parseFloat(gridSpacing)
+        const stopLossPct = isGridStopLossEnabled ? Number.parseFloat(gridStopLoss) : undefined
+
+        if (!Number.isFinite(lowerPrice) || !Number.isFinite(upperPrice)) {
+          setCreateBotError('Enter both lower and upper prices for the grid range.')
+          return
+        }
+
+        if (upperPrice <= lowerPrice) {
+          setCreateBotError('Upper price must be greater than the lower price.')
+          return
+        }
+
+        if (!Number.isInteger(gridLevelCount) || gridLevelCount < 2) {
+          setCreateBotError('Grid levels must be a whole number greater than or equal to 2.')
+          return
+        }
+
+        if (!Number.isFinite(spacingPct) || spacingPct <= 0) {
+          setCreateBotError('Grid spacing must be greater than 0.')
+          return
+        }
+
+        if (
+          isGridStopLossEnabled
+          && (!Number.isFinite(stopLossPct) || (stopLossPct ?? 0) <= 0)
+        ) {
+          setCreateBotError('Stop-loss percentage must be greater than 0.')
+          return
+        }
+
+        nextDashboard = await createBot({
+          // @ts-ignore
+          data: {
+            strategy: 'grid',
+            gridConfig: {
+              lowerPrice,
+              upperPrice,
+              gridCount: gridLevelCount,
+              spacingPct,
+              stopLossEnabled: isGridStopLossEnabled,
+              stopLossPct,
+            },
           },
-        },
-      })
+        })
+      } else if (selectedBotType === 'rebalance') {
+        const targetRatioPct = Number.parseFloat(rebalanceTargetRatio)
+        const thresholdPct = Number.parseFloat(rebalanceThreshold)
+        const intervalMinutes = Number.parseInt(rebalanceInterval, 10)
+
+        if (!Number.isFinite(targetRatioPct) || targetRatioPct < 0 || targetRatioPct > 100) {
+          setCreateBotError('Target BTC allocation must be between 0% and 100%.')
+          return
+        }
+
+        if (!Number.isFinite(thresholdPct) || thresholdPct <= 0) {
+          setCreateBotError('Drift threshold must be greater than 0%.')
+          return
+        }
+
+        if (!Number.isInteger(intervalMinutes) || intervalMinutes <= 0) {
+          setCreateBotError('Rebalance interval must be a whole number of minutes greater than 0.')
+          return
+        }
+
+        nextDashboard = await createBot({
+          // @ts-ignore
+          data: {
+            strategy: 'rebalance',
+            rebalanceConfig: {
+              targetBtcRatio: targetRatioPct / 100,
+              rebalanceThresholdPct: thresholdPct,
+              intervalMinutes,
+            },
+          },
+        })
+      } else {
+        setCreateBotError('Infinity Grid is not wired into the live create flow yet.')
+        return
+      }
+
       setDashboard(nextDashboard)
       setIsCreateBotModalOpen(false)
       setGridLowerPrice('')
@@ -420,6 +456,9 @@ function DashboardPage() {
       setGridSpacing('2')
       setIsGridStopLossEnabled(false)
       setGridStopLoss('10')
+      setRebalanceTargetRatio('50')
+      setRebalanceThreshold('5')
+      setRebalanceInterval('60')
     } catch (error) {
       setCreateBotError(error instanceof Error ? error.message : 'Unable to create the bot right now.')
     } finally {
@@ -827,9 +866,9 @@ function DashboardPage() {
                   Which bot do you want to create?
                 </h2>
                 <p className="mt-3 max-w-xl text-sm leading-6 text-zinc-400">
-                  Pick a strategy card first. Grid Bot is fully wired: the dashboard will POST the
-                  config to the backend, create the active strategy, and store the generated trades
-                  in SQLite immediately.
+                  Pick a strategy card first. Grid and Rebalance are both wired end to end: the
+                  dashboard posts the config to the backend, creates the active strategy, and
+                  stores the generated paper trades in SQLite immediately.
                 </p>
 
                 <div className="mt-6 grid gap-4">
@@ -1011,6 +1050,96 @@ function DashboardPage() {
                       </button>
                       <button
                         className="rounded-xl bg-emerald-400 px-4 py-2 text-sm font-medium text-zinc-950 transition hover:bg-emerald-300 disabled:cursor-not-allowed disabled:bg-emerald-400/60"
+                        disabled={isCreatingBot}
+                        type="submit"
+                      >
+                        {isCreatingBot ? 'Starting bot...' : 'Start bot'}
+                      </button>
+                    </div>
+                  </form>
+                ) : selectedBotType === 'rebalance' ? (
+                  <form className="space-y-5" onSubmit={handleCreateBotSubmit}>
+                    <div>
+                      <p className="text-xs font-medium uppercase tracking-[0.3em] text-zinc-500">
+                        Rebalance Parameters
+                      </p>
+                      <h3 className="mt-2 text-2xl font-medium tracking-tight text-zinc-100">
+                        Keep allocation centered
+                      </h3>
+                      <p className="mt-2 text-sm leading-6 text-zinc-400">
+                        The bot will monitor BTC exposure against your target mix and plan a paper
+                        trade whenever drift breaches the threshold.
+                      </p>
+                    </div>
+
+                    <div className="grid gap-4 sm:grid-cols-2">
+                      <label className="block">
+                        <span className="mb-2 block text-sm font-medium text-zinc-300">
+                          Target BTC allocation (%)
+                        </span>
+                        <input
+                          className="w-full rounded-xl border border-zinc-800 bg-zinc-900/80 px-4 py-3 text-zinc-100 outline-none transition placeholder:text-zinc-600 focus:border-amber-400/50 focus:ring-1 focus:ring-amber-400/50"
+                          inputMode="decimal"
+                          type="number"
+                          min="0"
+                          max="100"
+                          step="1"
+                          value={rebalanceTargetRatio}
+                          onChange={(event) => setRebalanceTargetRatio(event.target.value)}
+                        />
+                      </label>
+                      <label className="block">
+                        <span className="mb-2 block text-sm font-medium text-zinc-300">
+                          Drift threshold (%)
+                        </span>
+                        <input
+                          className="w-full rounded-xl border border-zinc-800 bg-zinc-900/80 px-4 py-3 text-zinc-100 outline-none transition placeholder:text-zinc-600 focus:border-amber-400/50 focus:ring-1 focus:ring-amber-400/50"
+                          inputMode="decimal"
+                          type="number"
+                          min="0.1"
+                          step="0.1"
+                          value={rebalanceThreshold}
+                          onChange={(event) => setRebalanceThreshold(event.target.value)}
+                        />
+                      </label>
+                      <label className="block sm:col-span-2">
+                        <span className="mb-2 block text-sm font-medium text-zinc-300">
+                          Check interval (minutes)
+                        </span>
+                        <input
+                          className="w-full rounded-xl border border-zinc-800 bg-zinc-900/80 px-4 py-3 text-zinc-100 outline-none transition placeholder:text-zinc-600 focus:border-amber-400/50 focus:ring-1 focus:ring-amber-400/50"
+                          inputMode="numeric"
+                          type="number"
+                          min="1"
+                          step="1"
+                          value={rebalanceInterval}
+                          onChange={(event) => setRebalanceInterval(event.target.value)}
+                        />
+                      </label>
+                    </div>
+
+                    <div className="rounded-2xl border border-zinc-800 bg-zinc-900/60 p-4 text-sm leading-6 text-zinc-400">
+                      Starting this bot creates a live dashboard entry and stores the opening
+                      rebalance paper trade in the same SQLite ledger used by the grid flow.
+                    </div>
+
+                    {createBotError ? (
+                      <div className="rounded-xl border border-rose-500/20 bg-rose-500/10 px-4 py-3 text-sm text-rose-300">
+                        {createBotError}
+                      </div>
+                    ) : null}
+
+                    <div className="flex items-center justify-end gap-3">
+                      <button
+                        className="rounded-xl border border-zinc-700 px-4 py-2 text-sm text-zinc-300 transition hover:border-zinc-500 hover:text-zinc-100"
+                        disabled={isCreatingBot}
+                        type="button"
+                        onClick={() => setIsCreateBotModalOpen(false)}
+                      >
+                        Cancel
+                      </button>
+                      <button
+                        className="rounded-xl bg-amber-300 px-4 py-2 text-sm font-medium text-zinc-950 transition hover:bg-amber-200 disabled:cursor-not-allowed disabled:bg-amber-300/60"
                         disabled={isCreatingBot}
                         type="submit"
                       >

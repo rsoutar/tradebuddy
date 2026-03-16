@@ -242,6 +242,93 @@ def test_grid_backtest_endpoint_accepts_custom_parameters(monkeypatch, tmp_path)
     assert summary["trades"] >= 2
 
 
+def test_rebalance_backtest_endpoint_accepts_custom_parameters(monkeypatch, tmp_path) -> None:
+    history_dir = tmp_path / "history"
+    write_history_archive(
+        history_dir,
+        "BTCUSDT-15m-2024-01.zip",
+        [
+            [
+                "1704067200000",
+                "100.0",
+                "100.0",
+                "100.0",
+                "100.0",
+                "100.0",
+                "1704068099999",
+                "10000.0",
+                "100",
+                "50.0",
+                "5000.0",
+                "0",
+            ],
+            [
+                "1704068100000",
+                "100.0",
+                "140.0",
+                "100.0",
+                "140.0",
+                "100.0",
+                "1704068999999",
+                "10000.0",
+                "100",
+                "50.0",
+                "5000.0",
+                "0",
+            ],
+            [
+                "1704069000000",
+                "140.0",
+                "140.0",
+                "70.0",
+                "70.0",
+                "100.0",
+                "1704069899999",
+                "10000.0",
+                "100",
+                "50.0",
+                "5000.0",
+                "0",
+            ],
+        ],
+    )
+    client = build_client(
+        monkeypatch,
+        tmp_path,
+        historical_loader=BinanceHistoricalKlineLoader(data_dir=history_dir),
+    )
+
+    response = client.post(
+        "/api/backtests/run",
+        json={
+            "strategy": "rebalance",
+            "user_id": "user-123",
+            "user_name": "Test Trader",
+            "start_at": "2024-01-01T00:00:00+00:00",
+            "end_at": "2024-01-01T00:45:00+00:00",
+            "initial_capital_usd": 250,
+            "fee_rate": 0.0,
+            "slippage_rate": 0.0,
+            "rebalance_config": {
+                "target_btc_ratio": 0.5,
+                "rebalance_threshold_pct": 5,
+                "interval_minutes": 15,
+            },
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    summary = payload["dashboard"]["lastBacktest"]
+    assert summary is not None
+    assert summary["strategy"] == "rebalance"
+    assert summary["startedAt"] == "2024-01-01T00:00:00+00:00"
+    assert summary["startEquityUsd"] == 250.0
+    assert summary["feeRate"] == 0.0
+    assert summary["slippageRate"] == 0.0
+    assert summary["trades"] >= 2
+
+
 def test_create_bot_persists_active_strategy_and_trades(monkeypatch, tmp_path) -> None:
     client = build_client(monkeypatch, tmp_path)
 
@@ -279,6 +366,35 @@ def test_create_bot_persists_active_strategy_and_trades(monkeypatch, tmp_path) -
 
     assert bot_count == 1
     assert trade_count == active_bot["tradeCount"]
+
+
+def test_create_rebalance_bot_persists_custom_config(monkeypatch, tmp_path) -> None:
+    client = build_client(monkeypatch, tmp_path)
+
+    response = client.post(
+        "/api/bots",
+        json={
+            "strategy": "rebalance",
+            "rebalance_config": {
+                "target_btc_ratio": 0.6,
+                "rebalance_threshold_pct": 3.5,
+                "interval_minutes": 30,
+            },
+            "user_id": "user-123",
+            "user_name": "Test Trader",
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["dashboard"]["botStatus"] == "paper-running"
+    assert len(payload["dashboard"]["activeStrategies"]) == 1
+
+    active_bot = payload["dashboard"]["activeStrategies"][0]
+    assert active_bot["strategy"] == "rebalance"
+    assert active_bot["tradeCount"] > 0
+    assert "Target BTC 60%" in active_bot["configSummary"]
+    assert "3.5% drift threshold" in active_bot["configSummary"]
 
 
 def test_trade_history_endpoint_returns_recorded_trades(monkeypatch, tmp_path) -> None:

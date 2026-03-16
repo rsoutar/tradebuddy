@@ -4,7 +4,7 @@ import { lazy, Suspense, useMemo, useState, type FormEvent } from 'react'
 import type { BacktestEquityPoint } from '../components/backtest-equity-chart'
 import { ProtectedMenuButton, ProtectedShell } from '../components/protected-shell'
 import { requireAuthenticatedViewer } from '../lib/protected-route'
-import { getDashboard, runBacktest, type BacktestSummary, type DashboardState } from '../lib/session'
+import { getDashboard, runBacktest, type DashboardState, type StrategyKey } from '../lib/session'
 import { useTheme } from '../lib/theme'
 import { Route as RootRoute } from './__root'
 
@@ -179,7 +179,9 @@ function BacktestPage() {
   const loaderData = Route.useLoaderData()
   const { effectiveTheme } = useTheme()
   const [dashboard, setDashboard] = useState<DashboardState>(loaderData.dashboard)
+  const market = loaderData.market
   const initialWindow = defaultBacktestWindow()
+  const [selectedStrategy, setSelectedStrategy] = useState<StrategyKey>('grid')
   const [startDate, setStartDate] = useState(initialWindow.start)
   const [endDate, setEndDate] = useState(initialWindow.end)
   const [capitalUsd, setCapitalUsd] = useState('250')
@@ -192,6 +194,9 @@ function BacktestPage() {
   const [stopAtUpperEnabled, setStopAtUpperEnabled] = useState(false)
   const [stopLossEnabled, setStopLossEnabled] = useState(false)
   const [stopLossPct, setStopLossPct] = useState('8')
+  const [targetBtcRatio, setTargetBtcRatio] = useState('50')
+  const [rebalanceThresholdPct, setRebalanceThresholdPct] = useState('5')
+  const [intervalMinutes, setIntervalMinutes] = useState('60')
   const [isRunning, setIsRunning] = useState(false)
   const [formError, setFormError] = useState<string>()
   const [successNote, setSuccessNote] = useState<string>()
@@ -246,6 +251,9 @@ function BacktestPage() {
     const parsedGridCount = Number.parseInt(gridCount, 10)
     const parsedSpacingPct = Number.parseFloat(spacingPct)
     const parsedStopLossPct = stopLossEnabled ? Number.parseFloat(stopLossPct) : undefined
+    const parsedTargetRatio = Number.parseFloat(targetBtcRatio)
+    const parsedThresholdPct = Number.parseFloat(rebalanceThresholdPct)
+    const parsedIntervalMinutes = Number.parseInt(intervalMinutes, 10)
 
     if (!startDate || !endDate) {
       setFormError('Choose a backtest start and end date.')
@@ -259,22 +267,6 @@ function BacktestPage() {
       setFormError('Initial capital must be greater than 0.')
       return
     }
-    if (!Number.isFinite(parsedLowerPrice) || !Number.isFinite(parsedUpperPrice)) {
-      setFormError('Enter both lower and upper grid bounds.')
-      return
-    }
-    if (parsedUpperPrice <= parsedLowerPrice) {
-      setFormError('Upper price must be greater than the lower price.')
-      return
-    }
-    if (!Number.isInteger(parsedGridCount) || parsedGridCount < 2) {
-      setFormError('Grid count must be a whole number greater than or equal to 2.')
-      return
-    }
-    if (!Number.isFinite(parsedSpacingPct) || parsedSpacingPct <= 0) {
-      setFormError('Spacing percentage must be greater than 0.')
-      return
-    }
     if (!Number.isFinite(parsedFeeRate) || parsedFeeRate < 0) {
       setFormError('Fee rate must be 0 or greater.')
       return
@@ -283,8 +275,42 @@ function BacktestPage() {
       setFormError('Slippage rate must be 0 or greater.')
       return
     }
-    if (stopLossEnabled && (!Number.isFinite(parsedStopLossPct) || (parsedStopLossPct ?? 0) <= 0)) {
-      setFormError('Stop-loss percentage must be greater than 0 when enabled.')
+    if (selectedStrategy === 'grid') {
+      if (!Number.isFinite(parsedLowerPrice) || !Number.isFinite(parsedUpperPrice)) {
+        setFormError('Enter both lower and upper grid bounds.')
+        return
+      }
+      if (parsedUpperPrice <= parsedLowerPrice) {
+        setFormError('Upper price must be greater than the lower price.')
+        return
+      }
+      if (!Number.isInteger(parsedGridCount) || parsedGridCount < 2) {
+        setFormError('Grid count must be a whole number greater than or equal to 2.')
+        return
+      }
+      if (!Number.isFinite(parsedSpacingPct) || parsedSpacingPct <= 0) {
+        setFormError('Spacing percentage must be greater than 0.')
+        return
+      }
+      if (stopLossEnabled && (!Number.isFinite(parsedStopLossPct) || (parsedStopLossPct ?? 0) <= 0)) {
+        setFormError('Stop-loss percentage must be greater than 0 when enabled.')
+        return
+      }
+    } else if (selectedStrategy === 'rebalance') {
+      if (!Number.isFinite(parsedTargetRatio) || parsedTargetRatio < 0 || parsedTargetRatio > 100) {
+        setFormError('Target BTC allocation must be between 0% and 100%.')
+        return
+      }
+      if (!Number.isFinite(parsedThresholdPct) || parsedThresholdPct <= 0) {
+        setFormError('Drift threshold must be greater than 0.')
+        return
+      }
+      if (!Number.isInteger(parsedIntervalMinutes) || parsedIntervalMinutes <= 0) {
+        setFormError('Rebalance interval must be a whole number of minutes greater than 0.')
+        return
+      }
+    } else {
+      setFormError('Infinity Grid backtests are not wired to the backend yet.')
       return
     }
 
@@ -295,25 +321,40 @@ function BacktestPage() {
       const nextDashboard = await runBacktest({
         // @ts-ignore
         data: {
-          strategy: 'grid',
+          strategy: selectedStrategy,
           startAt: `${startDate}T00:00:00+00:00`,
           endAt: `${endDate}T00:00:00+00:00`,
           initialCapitalUsd: parsedCapital,
           feeRate: parsedFeeRate,
           slippageRate: parsedSlippageRate,
-          gridConfig: {
-            lowerPrice: parsedLowerPrice,
-            upperPrice: parsedUpperPrice,
-            gridCount: parsedGridCount,
-            spacingPct: parsedSpacingPct,
-            stopAtUpperEnabled,
-            stopLossEnabled,
-            stopLossPct: parsedStopLossPct,
-          },
+          gridConfig:
+            selectedStrategy === 'grid'
+              ? {
+                  lowerPrice: parsedLowerPrice,
+                  upperPrice: parsedUpperPrice,
+                  gridCount: parsedGridCount,
+                  spacingPct: parsedSpacingPct,
+                  stopAtUpperEnabled,
+                  stopLossEnabled,
+                  stopLossPct: parsedStopLossPct,
+                }
+              : undefined,
+          rebalanceConfig:
+            selectedStrategy === 'rebalance'
+              ? {
+                  targetBtcRatio: parsedTargetRatio / 100,
+                  rebalanceThresholdPct: parsedThresholdPct,
+                  intervalMinutes: parsedIntervalMinutes,
+                }
+              : undefined,
         },
       })
       setDashboard(nextDashboard)
-      setSuccessNote('Backtest completed with the latest historical replay from the backend.')
+      setSuccessNote(
+        selectedStrategy === 'grid'
+          ? 'Grid backtest completed with the latest historical replay from the backend.'
+          : 'Rebalance backtest completed with the latest historical replay from the backend.',
+      )
     } catch (error) {
       setFormError(error instanceof Error ? error.message : 'Unable to run the backtest right now.')
     } finally {
@@ -330,6 +371,9 @@ function BacktestPage() {
   const parsedUpperPrice = Number.parseFloat(upperPrice)
   const parsedGridCount = Number.parseInt(gridCount, 10)
   const parsedSpacingPct = Number.parseFloat(spacingPct)
+  const parsedTargetRatio = Number.parseFloat(targetBtcRatio)
+  const parsedThresholdPct = Number.parseFloat(rebalanceThresholdPct)
+  const parsedIntervalMinutes = Number.parseInt(intervalMinutes, 10)
   const previewLevels = useMemo(
     () => buildGridPreviewLevels(parsedLowerPrice, parsedUpperPrice, parsedGridCount, parsedSpacingPct),
     [parsedGridCount, parsedLowerPrice, parsedSpacingPct, parsedUpperPrice],
@@ -337,6 +381,30 @@ function BacktestPage() {
   const deployableCapitalUsd = Number.isFinite(parsedCapitalUsd) && parsedCapitalUsd > 0 ? parsedCapitalUsd * 0.9 : 0
   const estimatedLevelBudgetUsd =
     deployableCapitalUsd > 0 && previewLevels.length > 1 ? deployableCapitalUsd / (previewLevels.length - 1) : 0
+  const targetAllocationUsd =
+    Number.isFinite(parsedCapitalUsd) && Number.isFinite(parsedTargetRatio)
+      ? parsedCapitalUsd * (parsedTargetRatio / 100)
+      : 0
+  const targetAllocationBtc =
+    targetAllocationUsd > 0 && market.price > 0 ? targetAllocationUsd / market.price : 0
+  const strategyCopy =
+    selectedStrategy === 'grid'
+      ? {
+          badge: 'Grid strategy live',
+          title: 'Tune the grid, replay the regime, and inspect whether the ladder still earns its keep.',
+          description:
+            'This page is wired directly to the backend backtest runner. The form sends your grid range, capital, fees, slippage, and stop-loss assumptions to the API and stores the latest result in the dashboard state.',
+          controlTitle: 'Configure grid inputs',
+          tradesDetail: 'Filled buy and sell grid executions.',
+        }
+      : {
+          badge: 'Rebalance strategy live',
+          title: 'Replay allocation drift, rebalance on schedule, and see how the portfolio held its shape.',
+          description:
+            'This path sends target allocation, drift threshold, interval cadence, capital, fees, and slippage assumptions to the backend rebalance runner and stores the latest replay summary in dashboard state.',
+          controlTitle: 'Configure rebalance inputs',
+          tradesDetail: 'Executed rebalance adjustments across the replay window.',
+        }
 
   return (
     <ProtectedShell
@@ -398,7 +466,7 @@ function BacktestPage() {
                   : 'border border-zinc-700 bg-zinc-950/50 text-zinc-400',
               )}
             >
-              Grid strategy live
+              {strategyCopy.badge}
             </span>
           </div>
           <h2
@@ -407,12 +475,10 @@ function BacktestPage() {
               isLightTheme ? 'text-stone-950' : 'text-zinc-50',
             )}
           >
-            Tune the grid, replay the regime, and inspect whether the ladder still earns its keep.
+            {strategyCopy.title}
           </h2>
           <p className={cx('mt-4 max-w-2xl text-sm leading-7', isLightTheme ? 'text-stone-600' : 'text-zinc-300/80')}>
-            This page is wired directly to the backend backtest runner. The form sends your grid
-            range, capital, fees, slippage, and stop-loss assumptions to the API and stores the
-            latest result in the dashboard state.
+            {strategyCopy.description}
           </p>
 
           <div className="mt-8 grid gap-4 md:grid-cols-3">
@@ -433,7 +499,7 @@ function BacktestPage() {
             <MetricCard
               label="Trades"
               value={numberFormatter.format(backtest?.trades ?? 0)}
-              detail="Filled buy and sell grid executions."
+              detail={strategyCopy.tradesDetail}
               icon="solar:transfer-horizontal-linear"
             />
           </div>
@@ -444,7 +510,7 @@ function BacktestPage() {
             <div>
               <p className="text-xs uppercase tracking-[0.24em] text-zinc-500">Run Control</p>
               <h2 className="mt-2 text-2xl font-semibold tracking-tight text-zinc-100">
-                Configure grid inputs
+                {strategyCopy.controlTitle}
               </h2>
             </div>
             <div className="flex h-11 w-11 items-center justify-center rounded-2xl border border-amber-300/20 bg-amber-400/10 text-amber-200">
@@ -453,6 +519,37 @@ function BacktestPage() {
           </div>
 
           <form className="mt-6 space-y-5" onSubmit={handleSubmit}>
+            <div className="grid gap-3 sm:grid-cols-2">
+              {([
+                ['grid', 'Grid', 'solar:widget-4-linear'],
+                ['rebalance', 'Rebalance', 'solar:refresh-circle-linear'],
+              ] as const).map(([key, label, icon]) => (
+                <button
+                  key={key}
+                  type="button"
+                  className={cx(
+                    'flex items-center justify-between rounded-2xl border px-4 py-3 text-left transition',
+                    selectedStrategy === key
+                      ? 'border-amber-300/35 bg-amber-400/10 text-zinc-100'
+                      : 'border-zinc-800 bg-zinc-900/70 text-zinc-400 hover:border-zinc-700 hover:text-zinc-200',
+                  )}
+                  onClick={() => {
+                    setFormError(undefined)
+                    setSuccessNote(undefined)
+                    setSelectedStrategy(key)
+                  }}
+                >
+                  <div>
+                    <p className="text-sm font-medium">{label}</p>
+                    <p className="mt-1 text-xs text-zinc-500">
+                      {key === 'grid' ? 'Range-based ladder replay' : 'Allocation drift replay'}
+                    </p>
+                  </div>
+                  <Icon icon={icon} width={18} height={18} />
+                </button>
+              ))}
+            </div>
+
             <div className="grid gap-4 sm:grid-cols-2">
               <Field label="Initial capital (USD)">
                 <input
@@ -467,38 +564,6 @@ function BacktestPage() {
               </Field>
               <Field label="End date">
                 <input type="date" value={endDate} onChange={(event) => setEndDate(event.target.value)} />
-              </Field>
-              <Field label="Grid count">
-                <input
-                  inputMode="numeric"
-                  value={gridCount}
-                  onChange={(event) => setGridCount(event.target.value)}
-                  placeholder="6"
-                />
-              </Field>
-              <Field label="Lower price">
-                <input
-                  inputMode="decimal"
-                  value={lowerPrice}
-                  onChange={(event) => setLowerPrice(event.target.value)}
-                  placeholder="98000"
-                />
-              </Field>
-              <Field label="Upper price">
-                <input
-                  inputMode="decimal"
-                  value={upperPrice}
-                  onChange={(event) => setUpperPrice(event.target.value)}
-                  placeholder="112000"
-                />
-              </Field>
-              <Field label="Spacing pct">
-                <input
-                  inputMode="decimal"
-                  value={spacingPct}
-                  onChange={(event) => setSpacingPct(event.target.value)}
-                  placeholder="2"
-                />
               </Field>
               <Field label="Fee rate">
                 <input
@@ -516,51 +581,114 @@ function BacktestPage() {
                   placeholder="0.0005"
                 />
               </Field>
-              <div className="rounded-2xl border border-zinc-800/80 bg-zinc-900/70 p-4">
-                <label className="flex items-start justify-between gap-3">
-                  <div>
-                    <p className="text-sm font-medium text-zinc-100">Stop when upper price is hit</p>
-                    <p className="mt-1 text-xs leading-5 text-zinc-500">
-                      End the backtest as soon as price touches the configured upper range.
-                    </p>
-                  </div>
-                  <input
-                    aria-label="Stop when upper price is hit"
-                    checked={stopAtUpperEnabled}
-                    className="mt-1 h-4 w-4 rounded border-zinc-700 bg-zinc-950 text-amber-400 focus:ring-amber-400"
-                    type="checkbox"
-                    onChange={(event) => setStopAtUpperEnabled(event.target.checked)}
-                  />
-                </label>
-              </div>
-              <div className="rounded-2xl border border-zinc-800/80 bg-zinc-900/70 p-4">
-                <label className="flex items-start justify-between gap-3">
-                  <div>
-                    <p className="text-sm font-medium text-zinc-100">Stop-loss protection</p>
-                    <p className="mt-1 text-xs leading-5 text-zinc-500">
-                      Liquidate remaining BTC if price breaches the configured threshold.
-                    </p>
-                  </div>
-                  <input
-                    aria-label="Enable stop-loss protection"
-                    checked={stopLossEnabled}
-                    className="mt-1 h-4 w-4 rounded border-zinc-700 bg-zinc-950 text-amber-400 focus:ring-amber-400"
-                    type="checkbox"
-                    onChange={(event) => setStopLossEnabled(event.target.checked)}
-                  />
-                </label>
-                <div className="mt-4">
-                  <Field label="Stop-loss pct">
+              {selectedStrategy === 'grid' ? (
+                <>
+                  <Field label="Grid count">
                     <input
-                      disabled={!stopLossEnabled}
-                      inputMode="decimal"
-                      value={stopLossPct}
-                      onChange={(event) => setStopLossPct(event.target.value)}
-                      placeholder="8"
+                      inputMode="numeric"
+                      value={gridCount}
+                      onChange={(event) => setGridCount(event.target.value)}
+                      placeholder="6"
                     />
                   </Field>
-                </div>
-              </div>
+                  <Field label="Lower price">
+                    <input
+                      inputMode="decimal"
+                      value={lowerPrice}
+                      onChange={(event) => setLowerPrice(event.target.value)}
+                      placeholder="98000"
+                    />
+                  </Field>
+                  <Field label="Upper price">
+                    <input
+                      inputMode="decimal"
+                      value={upperPrice}
+                      onChange={(event) => setUpperPrice(event.target.value)}
+                      placeholder="112000"
+                    />
+                  </Field>
+                  <Field label="Spacing pct">
+                    <input
+                      inputMode="decimal"
+                      value={spacingPct}
+                      onChange={(event) => setSpacingPct(event.target.value)}
+                      placeholder="2"
+                    />
+                  </Field>
+                  <div className="rounded-2xl border border-zinc-800/80 bg-zinc-900/70 p-4">
+                    <label className="flex items-start justify-between gap-3">
+                      <div>
+                        <p className="text-sm font-medium text-zinc-100">Stop when upper price is hit</p>
+                        <p className="mt-1 text-xs leading-5 text-zinc-500">
+                          End the backtest as soon as price touches the configured upper range.
+                        </p>
+                      </div>
+                      <input
+                        aria-label="Stop when upper price is hit"
+                        checked={stopAtUpperEnabled}
+                        className="mt-1 h-4 w-4 rounded border-zinc-700 bg-zinc-950 text-amber-400 focus:ring-amber-400"
+                        type="checkbox"
+                        onChange={(event) => setStopAtUpperEnabled(event.target.checked)}
+                      />
+                    </label>
+                  </div>
+                  <div className="rounded-2xl border border-zinc-800/80 bg-zinc-900/70 p-4">
+                    <label className="flex items-start justify-between gap-3">
+                      <div>
+                        <p className="text-sm font-medium text-zinc-100">Stop-loss protection</p>
+                        <p className="mt-1 text-xs leading-5 text-zinc-500">
+                          Liquidate remaining BTC if price breaches the configured threshold.
+                        </p>
+                      </div>
+                      <input
+                        aria-label="Enable stop-loss protection"
+                        checked={stopLossEnabled}
+                        className="mt-1 h-4 w-4 rounded border-zinc-700 bg-zinc-950 text-amber-400 focus:ring-amber-400"
+                        type="checkbox"
+                        onChange={(event) => setStopLossEnabled(event.target.checked)}
+                      />
+                    </label>
+                    <div className="mt-4">
+                      <Field label="Stop-loss pct">
+                        <input
+                          disabled={!stopLossEnabled}
+                          inputMode="decimal"
+                          value={stopLossPct}
+                          onChange={(event) => setStopLossPct(event.target.value)}
+                          placeholder="8"
+                        />
+                      </Field>
+                    </div>
+                  </div>
+                </>
+              ) : (
+                <>
+                  <Field label="Target BTC allocation (%)">
+                    <input
+                      inputMode="decimal"
+                      value={targetBtcRatio}
+                      onChange={(event) => setTargetBtcRatio(event.target.value)}
+                      placeholder="50"
+                    />
+                  </Field>
+                  <Field label="Drift threshold (%)">
+                    <input
+                      inputMode="decimal"
+                      value={rebalanceThresholdPct}
+                      onChange={(event) => setRebalanceThresholdPct(event.target.value)}
+                      placeholder="5"
+                    />
+                  </Field>
+                  <Field label="Check interval (minutes)">
+                    <input
+                      inputMode="numeric"
+                      value={intervalMinutes}
+                      onChange={(event) => setIntervalMinutes(event.target.value)}
+                      placeholder="60"
+                    />
+                  </Field>
+                </>
+              )}
             </div>
 
             <div
@@ -571,24 +699,49 @@ function BacktestPage() {
                   : 'border-zinc-800/80 bg-zinc-900/65',
               )}
             >
-              <DerivedMetric
-                label="Working Capital"
-                value={deployableCapitalUsd > 0 ? formatCurrency(deployableCapitalUsd) : '--'}
-                detail="Backtests deploy 90% of your capital into the grid ladder."
-                isLightTheme={isLightTheme}
-              />
-              <DerivedMetric
-                label="Levels In Range"
-                value={previewLevels.length ? numberFormatter.format(previewLevels.length) : '--'}
-                detail="Spacing, range, and grid count determine how many levels actually fit."
-                isLightTheme={isLightTheme}
-              />
-              <DerivedMetric
-                label="Est. Budget Per Level"
-                value={estimatedLevelBudgetUsd > 0 ? formatCurrency(estimatedLevelBudgetUsd) : '--'}
-                detail="Approximate capital allocated to each tradable gap between levels."
-                isLightTheme={isLightTheme}
-              />
+              {selectedStrategy === 'grid' ? (
+                <>
+                  <DerivedMetric
+                    label="Working Capital"
+                    value={deployableCapitalUsd > 0 ? formatCurrency(deployableCapitalUsd) : '--'}
+                    detail="Backtests deploy 90% of your capital into the grid ladder."
+                    isLightTheme={isLightTheme}
+                  />
+                  <DerivedMetric
+                    label="Levels In Range"
+                    value={previewLevels.length ? numberFormatter.format(previewLevels.length) : '--'}
+                    detail="Spacing, range, and grid count determine how many levels actually fit."
+                    isLightTheme={isLightTheme}
+                  />
+                  <DerivedMetric
+                    label="Est. Budget Per Level"
+                    value={estimatedLevelBudgetUsd > 0 ? formatCurrency(estimatedLevelBudgetUsd) : '--'}
+                    detail="Approximate capital allocated to each tradable gap between levels."
+                    isLightTheme={isLightTheme}
+                  />
+                </>
+              ) : (
+                <>
+                  <DerivedMetric
+                    label="Target BTC Value"
+                    value={targetAllocationUsd > 0 ? formatCurrency(targetAllocationUsd) : '--'}
+                    detail="The portfolio value the runner will try to keep in BTC."
+                    isLightTheme={isLightTheme}
+                  />
+                  <DerivedMetric
+                    label="Target BTC Size"
+                    value={targetAllocationBtc > 0 ? formatNumber(targetAllocationBtc, 6) : '--'}
+                    detail="Approximate BTC held at the current market reference price."
+                    isLightTheme={isLightTheme}
+                  />
+                  <DerivedMetric
+                    label="Rebalance Cadence"
+                    value={Number.isInteger(parsedIntervalMinutes) ? `${parsedIntervalMinutes} min` : '--'}
+                    detail={`Trades trigger only when drift exceeds ${Number.isFinite(parsedThresholdPct) ? formatPercent(parsedThresholdPct, 1) : '--'}.`}
+                    isLightTheme={isLightTheme}
+                  />
+                </>
+              )}
             </div>
 
             {formError ? (
@@ -617,7 +770,7 @@ function BacktestPage() {
                 {isRunning ? 'Running backtest...' : 'Run backtest'}
               </button>
               <p className="text-xs uppercase tracking-[0.2em] text-zinc-500">
-                Grid is live. Rebalance and Infinity Grid come next.
+                Grid and rebalance run against the backend now. Infinity Grid is next.
               </p>
             </div>
           </form>

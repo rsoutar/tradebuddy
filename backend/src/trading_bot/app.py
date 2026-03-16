@@ -17,7 +17,7 @@ from trading_bot.models import (
 )
 from trading_bot.paper_store import PaperTradingStore
 from trading_bot.runtime import BotProcessManager
-from trading_bot.services.backtesting import GridBacktestRunner
+from trading_bot.services.backtesting import GridBacktestRunner, RebalanceBacktestRunner
 from trading_bot.services.exchange import CcxtExchangeClient, MockExchangeClient
 from trading_bot.services.historical_data import BinanceHistoricalKlineLoader
 from trading_bot.services.binance_ws import BinanceSpotWebSocketMarketData
@@ -51,6 +51,7 @@ class TradingBotApp:
         self.risk_manager = RiskManager()
         self.historical_loader = historical_loader or BinanceHistoricalKlineLoader()
         self.grid_backtest_runner = GridBacktestRunner(self.historical_loader)
+        self.rebalance_backtest_runner = RebalanceBacktestRunner(self.historical_loader)
         self.process_manager = BotProcessManager(
             settings,
             self.paper_store,
@@ -445,6 +446,17 @@ class TradingBotApp:
             ),
         )
 
+    def _rebalance_config_from_payload(
+        self, config_payload: Optional[dict[str, Any]]
+    ) -> Optional[RebalanceBotConfig]:
+        if not config_payload:
+            return None
+        return RebalanceBotConfig(
+            target_btc_ratio=float(config_payload["target_btc_ratio"]),
+            rebalance_threshold_pct=float(config_payload["rebalance_threshold_pct"]),
+            interval_minutes=int(config_payload["interval_minutes"]),
+        )
+
     def dashboard(self, user_id: str = "demo-user", user_name: str = "Demo Trader") -> dict[str, Any]:
         self._reconcile_user_bots(user_id)
         snapshot = self.market_data.get_snapshot(self.settings.runtime.symbol)
@@ -543,6 +555,7 @@ class TradingBotApp:
         user_id: str = "demo-user",
         user_name: str = "Demo Trader",
         grid_config: Optional[dict[str, Any]] = None,
+        rebalance_config: Optional[dict[str, Any]] = None,
         start_at: Optional[datetime] = None,
         end_at: Optional[datetime] = None,
         initial_capital_usd: Optional[float] = None,
@@ -604,6 +617,56 @@ class TradingBotApp:
             )
             last_backtest = backtest.to_summary()
             tone = "warning" if backtest.stop_loss_triggered or backtest.upper_price_stop_triggered else "neutral"
+        elif strategy_type is StrategyType.REBALANCE:
+            runner = RebalanceBacktestRunner(
+                self.historical_loader,
+                fee_rate=(
+                    fee_rate if fee_rate is not None else self.rebalance_backtest_runner._fee_rate
+                ),
+                slippage_rate=(
+                    slippage_rate
+                    if slippage_rate is not None
+                    else self.rebalance_backtest_runner._slippage_rate
+                ),
+            )
+            normalized_start = self._normalize_datetime(start_at)
+            normalized_end = self._normalize_datetime(end_at)
+            if normalized_start is None or normalized_end is None:
+                normalized_start, normalized_end = runner.default_window()
+            window_candles = self.historical_loader.load_candles(
+                start=normalized_start,
+                end=normalized_end,
+            )
+            if not window_candles:
+                raise ValueError("No historical candles available for the requested backtest window.")
+            initial_snapshot = MarketSnapshot(
+                symbol=self.settings.runtime.symbol,
+                price=window_candles[0].open,
+                change_24h_pct=0.0,
+                volume_24h=0.0,
+                volatility_24h_pct=0.0,
+                trend="historical-replay",
+            )
+            config = self._resolve_strategy_config(
+                strategy_type,
+                initial_snapshot,
+                self._rebalance_config_from_payload(rebalance_config),
+            )
+            if not isinstance(config, RebalanceBotConfig):
+                raise ValueError("Rebalance backtest requires a rebalance configuration.")
+            backtest = runner.run(
+                config,
+                initial_capital_usd=(
+                    round(initial_capital_usd, 2)
+                    if initial_capital_usd is not None
+                    else max(account_state["usd_balance"], 100.0)
+                ),
+                start=normalized_start,
+                end=normalized_end,
+                completed_at=datetime.fromisoformat(completed_at),
+            )
+            last_backtest = backtest.to_summary()
+            tone = "warning" if backtest.warnings else "neutral"
         else:
             balances = self._paper_balances(account_state)
             evaluation_data = self._evaluate_strategy(strategy_type, snapshot, balances)
@@ -714,6 +777,7 @@ class TradingBotApp:
         user_id: str = "demo-user",
         user_name: str = "Demo Trader",
         grid_config: Optional[dict[str, Any]] = None,
+        rebalance_config: Optional[dict[str, Any]] = None,
     ) -> dict[str, Any]:
         timestamp = self._timestamp()
         snapshot = self.market_data.get_snapshot(self.settings.runtime.symbol)
@@ -726,6 +790,8 @@ class TradingBotApp:
         config_override = None
         if strategy_type is StrategyType.GRID:
             config_override = self._grid_config_from_payload(grid_config)
+        elif strategy_type is StrategyType.REBALANCE:
+            config_override = self._rebalance_config_from_payload(rebalance_config)
         evaluation_data = self._evaluate_strategy(
             strategy_type,
             snapshot,

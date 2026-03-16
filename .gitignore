@@ -21,3 +21,4 @@ frontend/.tanstack/
 frontend/src/routeTree.gen.ts
 .playwright-cli
 output/
+backend/.data

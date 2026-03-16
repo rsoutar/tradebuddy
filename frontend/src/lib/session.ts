@@ -193,6 +193,12 @@ export type GridBotInput = {
   stopLossPct?: number
 }
 
+export type RebalanceBotInput = {
+  targetBtcRatio: number
+  rebalanceThresholdPct: number
+  intervalMinutes: number
+}
+
 export type BacktestInput = {
   strategy: StrategyKey
   startAt?: string
@@ -201,6 +207,7 @@ export type BacktestInput = {
   feeRate?: number
   slippageRate?: number
   gridConfig?: GridBotInput
+  rebalanceConfig?: RebalanceBotInput
 }
 
 type SessionData = {
@@ -637,6 +644,13 @@ export const runBacktest = createServerFn({ method: 'POST' }).handler(
                 stop_loss_pct: input.gridConfig.stopLossPct,
               }
             : undefined,
+          rebalance_config: input.rebalanceConfig
+            ? {
+                target_btc_ratio: input.rebalanceConfig.targetBtcRatio,
+                rebalance_threshold_pct: input.rebalanceConfig.rebalanceThresholdPct,
+                interval_minutes: input.rebalanceConfig.intervalMinutes,
+              }
+            : undefined,
           ...getUserScope(session.data.user),
         }),
       },
@@ -650,6 +664,7 @@ export const createBot = createServerFn({ method: 'POST' }).handler(async ({ dat
   const input = (data ?? {}) as {
     strategy: StrategyKey
     gridConfig?: GridBotInput
+    rebalanceConfig?: RebalanceBotInput
   }
   const session = await useSession<SessionData>(getSessionConfig())
 
@@ -675,6 +690,13 @@ export const createBot = createServerFn({ method: 'POST' }).handler(async ({ dat
               stop_at_upper_enabled: input.gridConfig.stopAtUpperEnabled,
               stop_loss_enabled: input.gridConfig.stopLossEnabled,
               stop_loss_pct: input.gridConfig.stopLossPct,
+            }
+          : undefined,
+        rebalance_config: input.rebalanceConfig
+          ? {
+              target_btc_ratio: input.rebalanceConfig.targetBtcRatio,
+              rebalance_threshold_pct: input.rebalanceConfig.rebalanceThresholdPct,
+              interval_minutes: input.rebalanceConfig.intervalMinutes,
             }
           : undefined,
         ...getUserScope(session.data.user),
