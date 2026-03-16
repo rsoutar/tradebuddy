@@ -12,6 +12,7 @@ from trading_bot.models import (
     GridBotConfig,
     InfinityGridBotConfig,
     MarketSnapshot,
+    OrderIntent,
     RebalanceBotConfig,
     StrategyType,
 )
@@ -377,9 +378,94 @@ class TradingBotApp:
 
     def _paper_balances(self, account_state: dict[str, Any]) -> list[Balance]:
         return [
-            Balance(asset="BTC", free=0.0, locked=0.0),
+            Balance(asset="BTC", free=account_state["btc_balance"], locked=0.0),
             Balance(asset="USDT", free=account_state["usd_balance"], locked=0.0),
         ]
+
+    def _executable_orders(
+        self,
+        snapshot: MarketSnapshot,
+        balances: list[Balance],
+        orders: list[OrderIntent],
+    ) -> list[OrderIntent]:
+        remaining_usdt = next((balance.free for balance in balances if balance.asset == "USDT"), 0.0)
+        remaining_btc = next((balance.free for balance in balances if balance.asset == "BTC"), 0.0)
+        executable: list[OrderIntent] = []
+
+        for order in orders:
+            execution_price = order.price or snapshot.price
+            if order.side.value == "buy":
+                notional_usd = execution_price * order.amount
+                if notional_usd <= remaining_usdt + 1e-9:
+                    executable.append(order)
+                    remaining_usdt = round(remaining_usdt - notional_usd, 8)
+                continue
+
+            if order.amount <= remaining_btc + 1e-9:
+                executable.append(order)
+                remaining_btc = round(remaining_btc - order.amount, 8)
+
+        return executable
+
+    def process_bot_cycle(self, bot_id: str) -> dict[str, Any]:
+        bot = self.paper_store.get_bot_instance(bot_id=bot_id)
+        if bot is None:
+            raise ValueError(f"Unknown bot id: {bot_id}")
+
+        snapshot = self.market_data.get_snapshot(bot["symbol"])
+        filled_orders: list[dict[str, Any]] = []
+        strategy_type = StrategyType(bot["strategy"])
+
+        if strategy_type is StrategyType.GRID:
+            filled_orders = self.paper_store.fill_triggered_grid_orders(
+                bot_id=bot_id,
+                market_price=snapshot.price,
+                timestamp=self._timestamp(),
+            )
+        else:
+            filled_orders = self.paper_store.fill_triggered_orders(
+                bot_id=bot_id,
+                market_price=snapshot.price,
+                timestamp=self._timestamp(),
+            )
+
+        account_state = self.paper_store.ensure_account(
+            user_id=bot["userId"],
+            user_name=bot["userName"],
+            timestamp=self._timestamp(),
+        )
+        balances = self._paper_balances(account_state)
+        if strategy_type is StrategyType.GRID:
+            config_override = self._grid_config_from_payload(bot["config"])
+        elif strategy_type is StrategyType.REBALANCE:
+            config_override = self._rebalance_config_from_payload(bot["config"])
+        else:
+            config_override = self._infinity_grid_config_from_payload(bot["config"])
+        evaluation_data = self._evaluate_strategy(
+            strategy_type,
+            snapshot,
+            balances,
+            config_override=config_override,
+        )
+        if strategy_type is not StrategyType.GRID:
+            executable_orders = self._executable_orders(
+                snapshot,
+                balances,
+                evaluation_data["evaluation"].orders,
+            )
+            self.paper_store.sync_planned_orders(
+                bot_id=bot_id,
+                orders=executable_orders,
+                timestamp=self._timestamp(),
+            )
+        refreshed_bot = self.paper_store.get_bot_instance(bot_id=bot_id)
+        return {
+            "snapshot": snapshot,
+            "balances": balances,
+            "filledOrders": filled_orders,
+            "lastTradeAt": refreshed_bot["lastTradeAt"] if refreshed_bot is not None else None,
+            "evaluation": evaluation_data,
+        }
 
     def _bot_position_metrics(
         self,
@@ -892,6 +978,11 @@ class TradingBotApp:
             balances,
             config_override=config_override,
         )
+        planned_orders = self._executable_orders(
+            snapshot,
+            balances,
+            evaluation_data["evaluation"].orders,
+        )
         created_bot = self.paper_store.record_bot_start(
             user_id=user_id,
             user_name=user_name,
@@ -900,12 +991,13 @@ class TradingBotApp:
             symbol=snapshot.symbol,
             exchange=self.settings.exchange.exchange_id.title(),
             config=asdict(evaluation_data["config"]),
-            orders=evaluation_data["evaluation"].orders,
+            orders=planned_orders,
             snapshot_price=snapshot.price,
             timestamp=timestamp,
         )
         created_bot_id = created_bot.get("created_bot_id")
         if isinstance(created_bot_id, str):
+            self.process_bot_cycle(created_bot_id)
             self.process_manager.start_bot(created_bot_id)
         return self.dashboard(user_id=user_id, user_name=user_name)
 

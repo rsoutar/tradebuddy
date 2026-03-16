@@ -5,7 +5,7 @@ import sqlite3
 from pathlib import Path
 from typing import Any, Optional
 
-from trading_bot.models import OrderIntent
+from trading_bot.models import GridBotConfig, OrderIntent, OrderSide
 
 
 DEFAULT_INITIAL_DEPOSIT_USD = 100.0
@@ -31,6 +31,7 @@ class PaperTradingStore:
                     user_id TEXT PRIMARY KEY,
                     user_name TEXT NOT NULL,
                     usd_balance REAL NOT NULL,
+                    btc_balance REAL NOT NULL DEFAULT 0,
                     active_strategy TEXT NOT NULL,
                     bot_status TEXT NOT NULL,
                     paper_run_count INTEGER NOT NULL,
@@ -93,6 +94,7 @@ class PaperTradingStore:
                 );
                 """
             )
+            self._ensure_column(connection, "paper_accounts", "btc_balance", "REAL NOT NULL DEFAULT 0")
             self._ensure_column(connection, "bot_instances", "desired_status", "TEXT NOT NULL DEFAULT 'running'")
             self._ensure_column(connection, "bot_instances", "pid", "INTEGER")
             self._ensure_column(connection, "bot_instances", "heartbeat_at", "TEXT")
@@ -155,6 +157,7 @@ class PaperTradingStore:
                 user_id,
                 user_name,
                 usd_balance,
+                btc_balance,
                 active_strategy,
                 bot_status,
                 paper_run_count,
@@ -163,12 +166,13 @@ class PaperTradingStore:
                 created_at,
                 updated_at
             )
-            VALUES (?, ?, ?, 'grid', 'idle', 0, NULL, NULL, ?, ?)
+            VALUES (?, ?, ?, ?, 'grid', 'idle', 0, NULL, NULL, ?, ?)
             """,
             (
                 user_id,
                 user_name,
                 DEFAULT_INITIAL_DEPOSIT_USD,
+                0.0,
                 timestamp,
                 timestamp,
             ),
@@ -229,6 +233,7 @@ class PaperTradingStore:
             "user_id": row["user_id"],
             "user_name": row["user_name"],
             "usd_balance": round(float(row["usd_balance"]), 2),
+            "btc_balance": round(float(row["btc_balance"]), 8),
             "active_strategy": row["active_strategy"],
             "bot_status": row["bot_status"],
             "paper_run_count": int(row["paper_run_count"]),
@@ -511,6 +516,417 @@ class PaperTradingStore:
             payload = self._row_to_account_state(row)
             payload["created_bot_id"] = f"bot-{bot_id}"
             return payload
+
+    def fill_triggered_grid_orders(
+        self,
+        *,
+        bot_id: str,
+        market_price: float,
+        timestamp: str,
+    ) -> list[dict[str, Any]]:
+        numeric_id = int(bot_id.replace("bot-", "", 1))
+        filled_orders: list[dict[str, Any]] = []
+
+        with self._connect() as connection:
+            bot_row = connection.execute(
+                """
+                SELECT
+                    b.id,
+                    b.user_id,
+                    b.name,
+                    b.strategy,
+                    b.symbol,
+                    b.config_json,
+                    a.usd_balance,
+                    a.btc_balance
+                FROM bot_instances b
+                INNER JOIN paper_accounts a ON a.user_id = b.user_id
+                WHERE b.id = ? AND b.status = 'paper-running'
+                """,
+                (numeric_id,),
+            ).fetchone()
+            if bot_row is None or bot_row["strategy"] != "grid":
+                return []
+
+            config = GridBotConfig(**json.loads(bot_row["config_json"]))
+            levels = [round(level, 2) for level in config.price_levels()]
+            level_index = {level: index for index, level in enumerate(levels)}
+            usd_balance = float(bot_row["usd_balance"])
+            btc_balance = float(bot_row["btc_balance"])
+
+            planned_rows = connection.execute(
+                """
+                SELECT id, side, amount, price, notional_usd
+                FROM paper_trades
+                WHERE bot_id = ? AND status = 'planned'
+                ORDER BY
+                    CASE side WHEN 'buy' THEN price END DESC,
+                    CASE side WHEN 'sell' THEN price END ASC,
+                    id ASC
+                """,
+                (numeric_id,),
+            ).fetchall()
+
+            for row in planned_rows:
+                side = row["side"]
+                price = round(float(row["price"]), 2)
+                amount = float(row["amount"])
+                notional_usd = round(float(row["notional_usd"]), 2)
+
+                is_triggered = (
+                    side == OrderSide.BUY.value and market_price <= price
+                ) or (
+                    side == OrderSide.SELL.value and market_price >= price
+                )
+                if not is_triggered:
+                    continue
+
+                if side == OrderSide.BUY.value and usd_balance + 1e-9 < notional_usd:
+                    continue
+                if side == OrderSide.SELL.value and btc_balance + 1e-9 < amount:
+                    continue
+
+                connection.execute(
+                    """
+                    UPDATE paper_trades
+                    SET status = 'filled',
+                        created_at = ?
+                    WHERE id = ?
+                    """,
+                    (timestamp, row["id"]),
+                )
+
+                if side == OrderSide.BUY.value:
+                    usd_balance = round(usd_balance - notional_usd, 8)
+                    btc_balance = round(btc_balance + amount, 8)
+                    rearm_side = OrderSide.SELL.value
+                    rearm_index = level_index.get(price, -1) + 1
+                    rearm_rationale = "Take profit on the next higher grid level after a filled buy."
+                    event_detail = (
+                        f"Paper buy filled at ${price:,.2f} as BTC/USDT traded down into the grid."
+                    )
+                else:
+                    usd_balance = round(usd_balance + notional_usd, 8)
+                    btc_balance = round(max(btc_balance - amount, 0.0), 8)
+                    rearm_side = OrderSide.BUY.value
+                    rearm_index = level_index.get(price, len(levels)) - 1
+                    rearm_rationale = "Re-arm the lower grid bid after taking profit on the sell."
+                    event_detail = (
+                        f"Paper sell filled at ${price:,.2f} as BTC/USDT traded up through the grid."
+                    )
+
+                self._insert_event(
+                    connection,
+                    user_id=bot_row["user_id"],
+                    event_type="bot_fill",
+                    tone="positive",
+                    title=f"{bot_row['name']} filled {side}",
+                    detail=event_detail,
+                    amount_usd=notional_usd,
+                    timestamp=timestamp,
+                )
+
+                filled_orders.append(
+                    {
+                        "tradeId": f"trade-{row['id']}",
+                        "side": side,
+                        "price": price,
+                        "amount": round(amount, 6),
+                        "notionalUsd": notional_usd,
+                    }
+                )
+
+                if 0 <= rearm_index < len(levels):
+                    rearm_price = levels[rearm_index]
+                    existing_planned = connection.execute(
+                        """
+                        SELECT 1
+                        FROM paper_trades
+                        WHERE bot_id = ? AND status = 'planned' AND side = ? AND price = ?
+                        LIMIT 1
+                        """,
+                        (numeric_id, rearm_side, rearm_price),
+                    ).fetchone()
+                    if existing_planned is None:
+                        connection.execute(
+                            """
+                            INSERT INTO paper_trades (
+                                user_id,
+                                bot_id,
+                                strategy,
+                                symbol,
+                                side,
+                                order_type,
+                                amount,
+                                price,
+                                notional_usd,
+                                rationale,
+                                status,
+                                created_at
+                            )
+                            VALUES (?, ?, 'grid', ?, ?, 'limit', ?, ?, ?, ?, 'planned', ?)
+                            """,
+                            (
+                                bot_row["user_id"],
+                                numeric_id,
+                                bot_row["symbol"],
+                                rearm_side,
+                                round(amount, 6),
+                                rearm_price,
+                                round(rearm_price * amount, 2),
+                                rearm_rationale,
+                                timestamp,
+                            ),
+                        )
+
+            if not filled_orders:
+                return []
+
+            connection.execute(
+                """
+                UPDATE paper_accounts
+                SET usd_balance = ?,
+                    btc_balance = ?,
+                    updated_at = ?
+                WHERE user_id = ?
+                """,
+                (usd_balance, btc_balance, timestamp, bot_row["user_id"]),
+            )
+            connection.execute(
+                """
+                UPDATE bot_instances
+                SET last_trade_at = ?,
+                    updated_at = ?
+                WHERE id = ?
+                """,
+                (timestamp, timestamp, numeric_id),
+            )
+
+        return filled_orders
+
+    def fill_triggered_orders(
+        self,
+        *,
+        bot_id: str,
+        market_price: float,
+        timestamp: str,
+    ) -> list[dict[str, Any]]:
+        numeric_id = int(bot_id.replace("bot-", "", 1))
+        filled_orders: list[dict[str, Any]] = []
+
+        with self._connect() as connection:
+            bot_row = connection.execute(
+                """
+                SELECT
+                    b.id,
+                    b.user_id,
+                    b.name,
+                    b.strategy,
+                    b.symbol,
+                    a.usd_balance,
+                    a.btc_balance
+                FROM bot_instances b
+                INNER JOIN paper_accounts a ON a.user_id = b.user_id
+                WHERE b.id = ? AND b.status = 'paper-running'
+                """,
+                (numeric_id,),
+            ).fetchone()
+            if bot_row is None:
+                return []
+
+            usd_balance = float(bot_row["usd_balance"])
+            btc_balance = float(bot_row["btc_balance"])
+
+            planned_rows = connection.execute(
+                """
+                SELECT id, side, amount, price, notional_usd
+                FROM paper_trades
+                WHERE bot_id = ? AND status = 'planned'
+                ORDER BY
+                    CASE side WHEN 'buy' THEN price END DESC,
+                    CASE side WHEN 'sell' THEN price END ASC,
+                    id ASC
+                """,
+                (numeric_id,),
+            ).fetchall()
+
+            for row in planned_rows:
+                side = row["side"]
+                price = round(float(row["price"]), 2)
+                amount = float(row["amount"])
+                notional_usd = round(float(row["notional_usd"]), 2)
+                is_triggered = (
+                    side == OrderSide.BUY.value and market_price <= price
+                ) or (
+                    side == OrderSide.SELL.value and market_price >= price
+                )
+                if not is_triggered:
+                    continue
+                if side == OrderSide.BUY.value and usd_balance + 1e-9 < notional_usd:
+                    continue
+                if side == OrderSide.SELL.value and btc_balance + 1e-9 < amount:
+                    continue
+
+                connection.execute(
+                    """
+                    UPDATE paper_trades
+                    SET status = 'filled',
+                        created_at = ?
+                    WHERE id = ?
+                    """,
+                    (timestamp, row["id"]),
+                )
+
+                if side == OrderSide.BUY.value:
+                    usd_balance = round(usd_balance - notional_usd, 8)
+                    btc_balance = round(btc_balance + amount, 8)
+                    detail = (
+                        f"Paper buy filled at ${price:,.2f} as BTC/USDT traded down into the resting limit."
+                    )
+                else:
+                    usd_balance = round(usd_balance + notional_usd, 8)
+                    btc_balance = round(max(btc_balance - amount, 0.0), 8)
+                    detail = (
+                        f"Paper sell filled at ${price:,.2f} as BTC/USDT traded up into the resting limit."
+                    )
+
+                self._insert_event(
+                    connection,
+                    user_id=bot_row["user_id"],
+                    event_type="bot_fill",
+                    tone="positive",
+                    title=f"{bot_row['name']} filled {side}",
+                    detail=detail,
+                    amount_usd=notional_usd,
+                    timestamp=timestamp,
+                )
+                filled_orders.append(
+                    {
+                        "tradeId": f"trade-{row['id']}",
+                        "side": side,
+                        "price": price,
+                        "amount": round(amount, 6),
+                        "notionalUsd": notional_usd,
+                    }
+                )
+
+            if not filled_orders:
+                return []
+
+            connection.execute(
+                """
+                UPDATE paper_accounts
+                SET usd_balance = ?,
+                    btc_balance = ?,
+                    updated_at = ?
+                WHERE user_id = ?
+                """,
+                (usd_balance, btc_balance, timestamp, bot_row["user_id"]),
+            )
+            connection.execute(
+                """
+                UPDATE bot_instances
+                SET last_trade_at = ?,
+                    updated_at = ?
+                WHERE id = ?
+                """,
+                (timestamp, timestamp, numeric_id),
+            )
+
+        return filled_orders
+
+    def sync_planned_orders(
+        self,
+        *,
+        bot_id: str,
+        orders: list[OrderIntent],
+        timestamp: str,
+    ) -> None:
+        numeric_id = int(bot_id.replace("bot-", "", 1))
+        with self._connect() as connection:
+            bot_row = connection.execute(
+                """
+                SELECT id, user_id, strategy, symbol
+                FROM bot_instances
+                WHERE id = ?
+                """,
+                (numeric_id,),
+            ).fetchone()
+            if bot_row is None:
+                return
+
+            existing_rows = connection.execute(
+                """
+                SELECT side, order_type, amount, price, rationale
+                FROM paper_trades
+                WHERE bot_id = ? AND status = 'planned'
+                ORDER BY side, price, amount, rationale
+                """,
+                (numeric_id,),
+            ).fetchall()
+
+            existing_signature = [
+                (
+                    row["side"],
+                    row["order_type"],
+                    round(float(row["amount"]), 6),
+                    round(float(row["price"]), 2),
+                    row["rationale"],
+                )
+                for row in existing_rows
+            ]
+            desired_signature = sorted(
+                (
+                    order.side.value,
+                    order.order_type.value,
+                    round(order.amount, 6),
+                    round(order.price or 0.0, 2),
+                    order.rationale,
+                )
+                for order in orders
+            )
+
+            if existing_signature == desired_signature:
+                return
+
+            connection.execute(
+                "DELETE FROM paper_trades WHERE bot_id = ? AND status = 'planned'",
+                (numeric_id,),
+            )
+            for order in orders:
+                execution_price = round(order.price or 0.0, 2)
+                connection.execute(
+                    """
+                    INSERT INTO paper_trades (
+                        user_id,
+                        bot_id,
+                        strategy,
+                        symbol,
+                        side,
+                        order_type,
+                        amount,
+                        price,
+                        notional_usd,
+                        rationale,
+                        status,
+                        created_at
+                    )
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'planned', ?)
+                    """,
+                    (
+                        bot_row["user_id"],
+                        numeric_id,
+                        bot_row["strategy"],
+                        order.symbol or bot_row["symbol"],
+                        order.side.value,
+                        order.order_type.value,
+                        round(order.amount, 6),
+                        execution_price,
+                        round(execution_price * order.amount, 2),
+                        order.rationale,
+                        timestamp,
+                    ),
+                )
 
     def record_backtest(
         self,
