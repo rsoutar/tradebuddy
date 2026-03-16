@@ -42,12 +42,12 @@ const botCatalog: Array<{
   },
   {
     key: 'infinity-grid',
-    eyebrow: 'Coming soon',
+    eyebrow: 'Ready now',
     description: 'Push the grid upward in trend mode and keep extending entries as the market climbs.',
     icon: 'solar:maximize-square-linear',
     accent:
       'border-sky-400/20 bg-[radial-gradient(circle_at_top,_rgba(56,189,248,0.12),_transparent_70%)]',
-    availableNow: false,
+    availableNow: true,
   },
 ]
 
@@ -238,6 +238,12 @@ function DashboardPage() {
   const [rebalanceTargetRatio, setRebalanceTargetRatio] = useState('50')
   const [rebalanceThreshold, setRebalanceThreshold] = useState('5')
   const [rebalanceInterval, setRebalanceInterval] = useState('60')
+  const [infinityReferencePrice, setInfinityReferencePrice] = useState(() =>
+    Math.round(loaderData.market.price).toString(),
+  )
+  const [infinitySpacingPct, setInfinitySpacingPct] = useState('1.5')
+  const [infinityOrderSizeUsd, setInfinityOrderSizeUsd] = useState('100')
+  const [infinityLevelsPerSide, setInfinityLevelsPerSide] = useState('6')
   const [depositAmount, setDepositAmount] = useState('')
   const [depositError, setDepositError] = useState<string>()
   const [isDepositing, setIsDepositing] = useState(false)
@@ -444,8 +450,40 @@ function DashboardPage() {
           },
         })
       } else {
-        setCreateBotError('Infinity Grid is not wired into the live create flow yet.')
-        return
+        const referencePrice = Number.parseFloat(infinityReferencePrice)
+        const spacingPct = Number.parseFloat(infinitySpacingPct)
+        const orderSizeUsd = Number.parseFloat(infinityOrderSizeUsd)
+        const levelsPerSide = Number.parseInt(infinityLevelsPerSide, 10)
+
+        if (!Number.isFinite(referencePrice) || referencePrice <= 0) {
+          setCreateBotError('Infinity Grid reference price must be greater than 0.')
+          return
+        }
+        if (!Number.isFinite(spacingPct) || spacingPct <= 0) {
+          setCreateBotError('Infinity Grid spacing must be greater than 0%.')
+          return
+        }
+        if (!Number.isFinite(orderSizeUsd) || orderSizeUsd <= 0) {
+          setCreateBotError('Order size must be greater than $0.')
+          return
+        }
+        if (!Number.isInteger(levelsPerSide) || levelsPerSide < 1) {
+          setCreateBotError('Levels per side must be a whole number greater than or equal to 1.')
+          return
+        }
+
+        nextDashboard = await createBot({
+          // @ts-ignore
+          data: {
+            strategy: 'infinity-grid',
+            infinityConfig: {
+              referencePrice,
+              spacingPct,
+              orderSizeUsd,
+              levelsPerSide,
+            },
+          },
+        })
       }
 
       setDashboard(nextDashboard)
@@ -459,6 +497,10 @@ function DashboardPage() {
       setRebalanceTargetRatio('50')
       setRebalanceThreshold('5')
       setRebalanceInterval('60')
+      setInfinityReferencePrice(Math.round(market.price).toString())
+      setInfinitySpacingPct('1.5')
+      setInfinityOrderSizeUsd('100')
+      setInfinityLevelsPerSide('6')
     } catch (error) {
       setCreateBotError(error instanceof Error ? error.message : 'Unable to create the bot right now.')
     } finally {
@@ -866,7 +908,7 @@ function DashboardPage() {
                   Which bot do you want to create?
                 </h2>
                 <p className="mt-3 max-w-xl text-sm leading-6 text-zinc-400">
-                  Pick a strategy card first. Grid and Rebalance are both wired end to end: the
+                  Pick a strategy card first. Every strategy below is wired end to end: the
                   dashboard posts the config to the backend, creates the active strategy, and
                   stores the generated paper trades in SQLite immediately.
                 </p>
@@ -882,7 +924,6 @@ function DashboardPage() {
                           isSelected
                             ? 'border-zinc-100/20 shadow-[0_0_0_1px_rgba(244,244,245,0.14)]'
                             : 'border-zinc-800 hover:border-zinc-700',
-                          !bot.availableNow && 'opacity-80',
                         )}
                         key={bot.key}
                         type="button"
@@ -1148,18 +1189,108 @@ function DashboardPage() {
                     </div>
                   </form>
                 ) : (
-                  <div className="flex h-full min-h-96 flex-col justify-center rounded-2xl border border-dashed border-zinc-800 bg-zinc-900/40 p-6 text-center">
-                    <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-2xl border border-zinc-800 bg-zinc-950 text-zinc-400">
-                      <Icon icon="solar:clock-circle-linear" width={24} height={24} />
+                  <form className="space-y-5" onSubmit={handleCreateBotSubmit}>
+                    <div>
+                      <p className="text-xs font-medium uppercase tracking-[0.3em] text-zinc-500">
+                        Infinity Grid Parameters
+                      </p>
+                      <h3 className="mt-2 text-2xl font-medium tracking-tight text-zinc-100">
+                        Build the classic geometric ladder
+                      </h3>
+                      <p className="mt-2 text-sm leading-6 text-zinc-400">
+                        The bot will maintain a two-sided geometric ladder around your reference
+                        price, buying below market, selling above market, and re-arming the
+                        opposite side after each fill.
+                      </p>
                     </div>
-                    <h3 className="mt-5 text-2xl font-medium tracking-tight text-zinc-100">
-                      {strategyLabels[selectedBotType]} is next in line
-                    </h3>
-                    <p className="mt-3 text-sm leading-6 text-zinc-400">
-                      The selection card is here already, but the parameter form and backend start
-                      flow are only wired for Grid Bot in this pass.
-                    </p>
-                  </div>
+
+                    <div className="grid gap-4 sm:grid-cols-2">
+                      <label className="block">
+                        <span className="mb-2 block text-sm font-medium text-zinc-300">
+                          Reference price
+                        </span>
+                        <input
+                          className="w-full rounded-xl border border-zinc-800 bg-zinc-900/80 px-4 py-3 text-zinc-100 outline-none transition placeholder:text-zinc-600 focus:border-sky-400/50 focus:ring-1 focus:ring-sky-400/50"
+                          inputMode="decimal"
+                          min="0.01"
+                          step="0.01"
+                          type="number"
+                          value={infinityReferencePrice}
+                          onChange={(event) => setInfinityReferencePrice(event.target.value)}
+                        />
+                      </label>
+                      <label className="block">
+                        <span className="mb-2 block text-sm font-medium text-zinc-300">Spacing (%)</span>
+                        <input
+                          className="w-full rounded-xl border border-zinc-800 bg-zinc-900/80 px-4 py-3 text-zinc-100 outline-none transition placeholder:text-zinc-600 focus:border-sky-400/50 focus:ring-1 focus:ring-sky-400/50"
+                          inputMode="decimal"
+                          min="0.01"
+                          step="0.1"
+                          type="number"
+                          value={infinitySpacingPct}
+                          onChange={(event) => setInfinitySpacingPct(event.target.value)}
+                        />
+                      </label>
+                      <label className="block">
+                        <span className="mb-2 block text-sm font-medium text-zinc-300">
+                          Order size (USD)
+                        </span>
+                        <input
+                          className="w-full rounded-xl border border-zinc-800 bg-zinc-900/80 px-4 py-3 text-zinc-100 outline-none transition placeholder:text-zinc-600 focus:border-sky-400/50 focus:ring-1 focus:ring-sky-400/50"
+                          inputMode="decimal"
+                          min="0.01"
+                          step="1"
+                          type="number"
+                          value={infinityOrderSizeUsd}
+                          onChange={(event) => setInfinityOrderSizeUsd(event.target.value)}
+                        />
+                      </label>
+                      <label className="block">
+                        <span className="mb-2 block text-sm font-medium text-zinc-300">
+                          Levels per side
+                        </span>
+                        <input
+                          className="w-full rounded-xl border border-zinc-800 bg-zinc-900/80 px-4 py-3 text-zinc-100 outline-none transition placeholder:text-zinc-600 focus:border-sky-400/50 focus:ring-1 focus:ring-sky-400/50"
+                          inputMode="numeric"
+                          min="1"
+                          step="1"
+                          type="number"
+                          value={infinityLevelsPerSide}
+                          onChange={(event) => setInfinityLevelsPerSide(event.target.value)}
+                        />
+                      </label>
+                    </div>
+
+                    <div className="rounded-2xl border border-zinc-800 bg-zinc-900/60 p-4 text-sm leading-6 text-zinc-400">
+                      Starting this bot stores the reference ladder, two-sided orders, and the
+                      first planned geometric buy and sell levels in the same paper-trading ledger
+                      as the other strategies.
+                    </div>
+
+                    {createBotError ? (
+                      <div className="rounded-xl border border-rose-500/20 bg-rose-500/10 px-4 py-3 text-sm text-rose-300">
+                        {createBotError}
+                      </div>
+                    ) : null}
+
+                    <div className="flex items-center justify-end gap-3">
+                      <button
+                        className="rounded-xl border border-zinc-700 px-4 py-2 text-sm text-zinc-300 transition hover:border-zinc-500 hover:text-zinc-100"
+                        disabled={isCreatingBot}
+                        type="button"
+                        onClick={() => setIsCreateBotModalOpen(false)}
+                      >
+                        Cancel
+                      </button>
+                      <button
+                        className="rounded-xl bg-sky-300 px-4 py-2 text-sm font-medium text-zinc-950 transition hover:bg-sky-200 disabled:cursor-not-allowed disabled:bg-sky-300/60"
+                        disabled={isCreatingBot}
+                        type="submit"
+                      >
+                        {isCreatingBot ? 'Starting bot...' : 'Start bot'}
+                      </button>
+                    </div>
+                  </form>
                 )}
               </div>
             </div>

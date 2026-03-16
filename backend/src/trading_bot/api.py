@@ -38,16 +38,25 @@ class RebalanceConfigRequest(BaseModel):
     interval_minutes: int = Field(gt=0)
 
 
+class InfinityGridConfigRequest(BaseModel):
+    reference_price: float = Field(gt=0)
+    spacing_pct: float = Field(gt=0)
+    order_size_usd: float = Field(gt=0)
+    levels_per_side: int = Field(ge=1)
+
+
 class CreateBotRequest(UserScopedRequest):
     strategy: StrategyType
     grid_config: Optional[GridConfigRequest] = None
     rebalance_config: Optional[RebalanceConfigRequest] = None
+    infinity_config: Optional[InfinityGridConfigRequest] = None
 
 
 class BacktestRequest(UserScopedRequest):
     strategy: StrategyType
     grid_config: Optional[GridConfigRequest] = None
     rebalance_config: Optional[RebalanceConfigRequest] = None
+    infinity_config: Optional[InfinityGridConfigRequest] = None
     start_at: Optional[datetime] = None
     end_at: Optional[datetime] = None
     initial_capital_usd: Optional[float] = Field(default=None, gt=0)
@@ -138,6 +147,9 @@ def create_api(trading_app: Optional[TradingBotApp] = None) -> FastAPI:
                 rebalance_config=(
                     payload.rebalance_config.model_dump() if payload.rebalance_config else None
                 ),
+                infinity_config=(
+                    payload.infinity_config.model_dump() if payload.infinity_config else None
+                ),
             )
         except ValueError as error:
             raise HTTPException(status_code=400, detail=str(error)) from error
@@ -174,6 +186,9 @@ def create_api(trading_app: Optional[TradingBotApp] = None) -> FastAPI:
                 grid_config=payload.grid_config.model_dump() if payload.grid_config else None,
                 rebalance_config=(
                     payload.rebalance_config.model_dump() if payload.rebalance_config else None
+                ),
+                infinity_config=(
+                    payload.infinity_config.model_dump() if payload.infinity_config else None
                 ),
                 start_at=payload.start_at,
                 end_at=payload.end_at,

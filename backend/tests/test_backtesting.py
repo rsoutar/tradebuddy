@@ -4,8 +4,12 @@ from datetime import datetime, timezone
 from pathlib import Path
 from zipfile import ZipFile
 
-from trading_bot.models import GridBotConfig, RebalanceBotConfig
-from trading_bot.services.backtesting import GridBacktestRunner, RebalanceBacktestRunner
+from trading_bot.models import GridBotConfig, InfinityGridBotConfig, RebalanceBotConfig
+from trading_bot.services.backtesting import (
+    GridBacktestRunner,
+    InfinityGridBacktestRunner,
+    RebalanceBacktestRunner,
+)
 from trading_bot.services.historical_data import BinanceHistoricalKlineLoader
 
 
@@ -245,3 +249,118 @@ def test_rebalance_backtest_runner_warns_when_drift_never_triggers(tmp_path: Pat
     assert result.warnings == [
         "Portfolio drift stayed within the configured threshold for the entire replay window."
     ]
+
+
+def test_infinity_grid_backtest_runner_executes_breakout_and_profit_take_cycles(
+    tmp_path: Path,
+) -> None:
+    write_archive(
+        tmp_path,
+        "BTCUSDT-15m-2024-01.zip",
+        [
+            [
+                "1704067200000",
+                "100.0",
+                "110.0",
+                "103.0",
+                "108.0",
+                "100.0",
+                "1704068099999",
+                "10000.0",
+                "100",
+                "50.0",
+                "5000.0",
+                "0",
+            ],
+            [
+                "1704068100000",
+                "108.0",
+                "116.0",
+                "108.0",
+                "114.0",
+                "100.0",
+                "1704068999999",
+                "10000.0",
+                "100",
+                "50.0",
+                "5000.0",
+                "0",
+            ],
+        ],
+    )
+
+    loader = BinanceHistoricalKlineLoader(data_dir=tmp_path)
+    runner = InfinityGridBacktestRunner(loader, fee_rate=0.0, slippage_rate=0.0)
+    result = runner.run(
+        InfinityGridBotConfig(
+            reference_price=100.0,
+            spacing_pct=5.0,
+            order_size_usd=20.0,
+            levels_per_side=3,
+        ),
+        initial_capital_usd=120.0,
+        start=datetime(2024, 1, 1, 0, 0, tzinfo=timezone.utc),
+        end=datetime(2024, 1, 1, 0, 30, tzinfo=timezone.utc),
+    )
+
+    assert result.strategy == "infinity-grid"
+    assert result.trades >= 2
+    assert any(trade["side"] == "buy" for trade in result.trade_log)
+    assert any(trade["side"] == "sell" for trade in result.trade_log)
+    assert result.stop_loss_triggered is False
+
+
+def test_infinity_grid_backtest_runner_extends_sell_ladder_higher_on_breakout(tmp_path: Path) -> None:
+    write_archive(
+        tmp_path,
+        "BTCUSDT-15m-2024-01.zip",
+        [
+            [
+                "1704067200000",
+                "100.0",
+                "125.0",
+                "100.0",
+                "124.0",
+                "100.0",
+                "1704068099999",
+                "10000.0",
+                "100",
+                "50.0",
+                "5000.0",
+                "0",
+            ],
+            [
+                "1704068100000",
+                "124.0",
+                "132.0",
+                "123.0",
+                "130.0",
+                "100.0",
+                "1704068999999",
+                "10000.0",
+                "100",
+                "50.0",
+                "5000.0",
+                "0",
+            ],
+        ],
+    )
+
+    loader = BinanceHistoricalKlineLoader(data_dir=tmp_path)
+    runner = InfinityGridBacktestRunner(loader, fee_rate=0.0, slippage_rate=0.0)
+    result = runner.run(
+        InfinityGridBotConfig(
+            reference_price=100.0,
+            spacing_pct=5.0,
+            order_size_usd=20.0,
+            levels_per_side=2,
+        ),
+        initial_capital_usd=120.0,
+        start=datetime(2024, 1, 1, 0, 0, tzinfo=timezone.utc),
+        end=datetime(2024, 1, 1, 0, 30, tzinfo=timezone.utc),
+    )
+
+    traded_levels = {trade["level"] for trade in result.trade_log if trade["side"] == "sell"}
+    assert 115.76 in traded_levels
+    assert any(level > 110.25 for level in traded_levels)
+    assert result.stop_loss_triggered is False

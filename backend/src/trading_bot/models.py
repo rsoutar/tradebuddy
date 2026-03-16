@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
+from math import floor, log
 from typing import Optional
 
 
@@ -140,23 +141,47 @@ class RebalanceBotConfig:
 
 @dataclass(frozen=True)
 class InfinityGridBotConfig:
-    lower_start_price: float
+    reference_price: float
     spacing_pct: float
-    profit_take_pct: float
-    trailing_stop_pct: float
-    max_active_grids: int = 6
+    order_size_usd: float
+    levels_per_side: int = 6
 
     def validate(self) -> None:
-        if self.lower_start_price <= 0:
-            raise ValueError("Infinity grid lower starting price must be positive.")
+        if self.reference_price <= 0:
+            raise ValueError("Infinity grid reference price must be positive.")
         if self.spacing_pct <= 0:
             raise ValueError("Infinity grid spacing must be greater than 0.")
-        if self.profit_take_pct <= 0:
-            raise ValueError("Profit take percentage must be greater than 0.")
-        if self.trailing_stop_pct <= 0:
-            raise ValueError("Trailing stop percentage must be greater than 0.")
-        if self.max_active_grids < 2:
-            raise ValueError("Infinity grid requires at least 2 active grids.")
+        if self.order_size_usd <= 0:
+            raise ValueError("Infinity grid order size must be greater than 0.")
+        if self.levels_per_side < 1:
+            raise ValueError("Infinity grid requires at least 1 level per side.")
+
+    def spacing_factor(self) -> float:
+        return 1 + (self.spacing_pct / 100)
+
+    def level_at(self, index: int) -> float:
+        return round(self.reference_price * (self.spacing_factor() ** index), 2)
+
+    def index_below(self, price: float) -> int:
+        if price <= 0:
+            raise ValueError("Price must be positive to calculate infinity grid levels.")
+
+        raw_index = floor(log(price / self.reference_price, self.spacing_factor()))
+
+        while self.level_at(raw_index) > price:
+            raw_index -= 1
+        while self.level_at(raw_index + 1) <= price:
+            raw_index += 1
+
+        return raw_index
+
+    def buy_levels(self, price: float) -> list[float]:
+        pivot = self.index_below(price)
+        return [self.level_at(pivot - offset) for offset in range(self.levels_per_side)]
+
+    def sell_levels(self, price: float) -> list[float]:
+        pivot = self.index_below(price)
+        return [self.level_at(pivot + 1 + offset) for offset in range(self.levels_per_side)]
 
 
 @dataclass

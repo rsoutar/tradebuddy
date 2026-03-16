@@ -1,0 +1,26 @@
+flowchart TD
+    classDef startEnd fill:#5b4fc4,stroke:#4338ca,stroke-width:2px,color:#ffffff
+    classDef process fill:#4a4a4a,stroke:#666666,stroke-width:2px,color:#ffffff
+    classDef decision fill:#8b5a2b,stroke:#a67c52,stroke-width:2px,color:#ffffff
+    classDef actionBuy fill:#1a5f4a,stroke:#2d8b6e,stroke-width:2px,color:#ffffff
+    classDef actionSell fill:#7c2d2d,stroke:#a53f3f,stroke-width:2px,color:#ffffff
+    classDef calc fill:#2d5a7c,stroke:#4a8ab8,stroke-width:2px,color:#ffffff
+
+    Start([Set price range<br/>Lower and Upper bounds]) --> CalcGrid[Calculate grid levels<br/>Based on spacing %]
+    CalcGrid --> Monitor[Monitor BTC price<br/>Track current market price]
+    Monitor --> CheckPrice{Price at<br/>grid level?}
+    CheckPrice -->|Price dropped to buy level| BuyBTC[BUY BTC<br/>Accumulate at lower level]
+    CheckPrice -->|Price rose to sell level| SellBTC[SELL BTC<br/>Take profit at upper level]
+    CheckPrice -->|Within range| Monitor
+    BuyBTC --> CheckStop{Stop loss triggered?}
+    SellBTC --> CheckStop
+    CheckStop -->|Yes| StopBot([Stop bot<br/>Exit position])
+    CheckStop -->|No| Rebuild[Rebuild grid orders<br/>Replace filled orders]
+    Rebuild --> Monitor
+
+    class Start,StopBot startEnd
+    class CalcGrid calc
+    class Monitor,Rebuild process
+    class CheckPrice,CheckStop decision
+    class BuyBTC actionBuy
+    class SellBTC actionSell

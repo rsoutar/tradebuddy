@@ -7,6 +7,7 @@ from math import inf
 from trading_bot.models import (
     GridBotConfig,
     HistoricalCandle,
+    InfinityGridBotConfig,
     OrderSide,
     RebalanceBotConfig,
     StrategyType,
@@ -295,6 +296,363 @@ class RebalanceBacktestRunner:
             else:
                 inventory_lots[0] = (lot_amount, lot_cost)
         return cost_basis
+
+    def _format_period_label(self, start: datetime, end: datetime) -> str:
+        return f"{start:%Y-%m-%d} to {end:%Y-%m-%d}"
+
+    def _max_drawdown_pct(self, equity_curve: list[float]) -> float:
+        peak = equity_curve[0]
+        max_drawdown = 0.0
+        for equity in equity_curve:
+            peak = max(peak, equity)
+            if peak <= 0:
+                continue
+            drawdown = ((peak - equity) / peak) * 100
+            max_drawdown = max(max_drawdown, drawdown)
+        return max_drawdown
+
+    def _profit_factor(self, gross_profit: float, gross_loss: float) -> float:
+        if gross_loss == 0:
+            return gross_profit if gross_profit > 0 else 0.0
+        return gross_profit / gross_loss
+
+    def _annualized_pct(self, initial_equity: float, final_equity: float, duration_days: float) -> float:
+        if initial_equity <= 0 or final_equity <= 0:
+            return -100.0
+        if duration_days < 1:
+            return ((final_equity / initial_equity) - 1) * 100
+        return (((final_equity / initial_equity) ** (365 / duration_days)) - 1) * 100
+
+    def _serialize_trade(self, trade: BacktestTrade) -> dict[str, object]:
+        payload = asdict(trade)
+        payload["timestamp"] = trade.timestamp.isoformat()
+        return payload
+
+
+class InfinityGridBacktestRunner:
+    def __init__(
+        self,
+        historical_loader: BinanceHistoricalKlineLoader,
+        *,
+        fee_rate: float = DEFAULT_GRID_FEE_RATE,
+        slippage_rate: float = DEFAULT_GRID_SLIPPAGE_RATE,
+    ) -> None:
+        self._historical_loader = historical_loader
+        self._fee_rate = fee_rate
+        self._slippage_rate = slippage_rate
+
+    def run(
+        self,
+        config: InfinityGridBotConfig,
+        *,
+        initial_capital_usd: float,
+        start: datetime | None = None,
+        end: datetime | None = None,
+        completed_at: datetime | None = None,
+    ) -> BacktestResult:
+        config.validate()
+        candles = self._historical_loader.load_candles(start=start, end=end)
+        if not candles:
+            raise ValueError("No historical candles available for the requested backtest window.")
+
+        capital = round(initial_capital_usd, 2)
+        initial_price = candles[0].open
+        usdt_balance = capital * 0.5
+        btc_balance = (capital * 0.5) / initial_price
+        inventory_lots: list[tuple[float, float]] = [(btc_balance, initial_price)] if btc_balance > 0 else []
+        realized_pnls: list[float] = []
+        trade_log: list[BacktestTrade] = []
+        warnings: list[str] = []
+        equity_curve: list[float] = [capital]
+        final_mark_price = initial_price
+        final_timestamp = candles[0].open_time
+        active_orders = self._initialize_active_orders(config, initial_price)
+        active_orders = self._maintain_active_window(config, initial_price, active_orders)
+
+        for candle in candles:
+            path = self._candle_path(candle)
+            for segment_start, segment_end in zip(path, path[1:]):
+                usdt_balance, btc_balance = self._process_segment(
+                    candle=candle,
+                    config=config,
+                    active_orders=active_orders,
+                    start_price=segment_start,
+                    end_price=segment_end,
+                    usdt_balance=usdt_balance,
+                    btc_balance=btc_balance,
+                    inventory_lots=inventory_lots,
+                    trade_log=trade_log,
+                    realized_pnls=realized_pnls,
+                )
+                active_orders = self._maintain_active_window(config, segment_end, active_orders)
+
+            equity_curve.append(usdt_balance + (btc_balance * candle.close))
+            final_mark_price = candle.close
+            final_timestamp = candle.close_time
+
+        if not trade_log:
+            warnings.append("Price never crossed a configured infinity grid level during the replay.")
+
+        final_equity = round(usdt_balance + (btc_balance * final_mark_price), 2)
+        completed_at = completed_at or datetime.now(timezone.utc)
+        gross_profit = sum(pnl for pnl in realized_pnls if pnl > 0)
+        gross_loss = abs(sum(pnl for pnl in realized_pnls if pnl < 0))
+        winning_trades = sum(1 for pnl in realized_pnls if pnl > 0)
+        closed_trades = len(realized_pnls)
+        duration_days = max(
+            (final_timestamp - candles[0].open_time).total_seconds() / 86_400,
+            1 / 24,
+        )
+
+        return BacktestResult(
+            strategy=StrategyType.INFINITY_GRID.value,
+            period_label=self._format_period_label(candles[0].open_time, final_timestamp),
+            started_at=candles[0].open_time.isoformat(),
+            completed_at=completed_at.isoformat(),
+            roi_pct=round(((final_equity / capital) - 1) * 100, 2),
+            max_drawdown_pct=round(self._max_drawdown_pct(equity_curve), 2),
+            profit_factor=round(self._profit_factor(gross_profit, gross_loss), 2),
+            win_rate_pct=round((winning_trades / closed_trades) * 100, 1) if closed_trades else 0.0,
+            trades=len(trade_log),
+            annualized_pct=round(self._annualized_pct(capital, final_equity, duration_days), 2),
+            start_equity_usd=capital,
+            final_equity_usd=final_equity,
+            fee_rate=self._fee_rate,
+            slippage_rate=self._slippage_rate,
+            stop_loss_triggered=False,
+            upper_price_stop_triggered=False,
+            warnings=warnings,
+            trade_log=[self._serialize_trade(trade) for trade in trade_log],
+        )
+
+    def default_window(self) -> tuple[datetime, datetime]:
+        archives = self._historical_loader.available_archives()
+        if not archives:
+            raise ValueError("No historical archives are available for backtesting.")
+        latest_candle = self._historical_loader._iter_archive_rows(archives[-1])[-1]
+        end = latest_candle.open_time + timedelta(minutes=15)
+        start = end - timedelta(days=DEFAULT_GRID_LOOKBACK_DAYS)
+        return start, end
+
+    def _initialize_active_orders(
+        self,
+        config: InfinityGridBotConfig,
+        initial_price: float,
+    ) -> dict[int, str]:
+        pivot = config.index_below(initial_price)
+        active_orders: dict[int, str] = {}
+        for offset in range(config.levels_per_side):
+            active_orders[pivot - offset] = OrderSide.BUY.value
+            active_orders[pivot + 1 + offset] = OrderSide.SELL.value
+        return active_orders
+
+    def _maintain_active_window(
+        self,
+        config: InfinityGridBotConfig,
+        current_price: float,
+        active_orders: dict[int, str],
+    ) -> dict[int, str]:
+        pivot = config.index_below(current_price)
+        for offset in range(config.levels_per_side):
+            active_orders.setdefault(pivot - offset, OrderSide.BUY.value)
+            active_orders.setdefault(pivot + 1 + offset, OrderSide.SELL.value)
+        return active_orders
+
+    def _process_segment(
+        self,
+        *,
+        candle: HistoricalCandle,
+        config: InfinityGridBotConfig,
+        active_orders: dict[int, str],
+        start_price: float,
+        end_price: float,
+        usdt_balance: float,
+        btc_balance: float,
+        inventory_lots: list[tuple[float, float]],
+        trade_log: list[BacktestTrade],
+        realized_pnls: list[float],
+    ) -> tuple[float, float]:
+        if end_price == start_price:
+            return usdt_balance, btc_balance
+
+        moving_up = end_price > start_price
+        current_price = start_price
+        while True:
+            next_index = self._next_triggered_index(
+                config=config,
+                active_orders=active_orders,
+                current_price=current_price,
+                target_price=end_price,
+                moving_up=moving_up,
+            )
+            if next_index is None:
+                return usdt_balance, btc_balance
+
+            level = config.level_at(next_index)
+            side = active_orders[next_index]
+            if side == OrderSide.BUY.value:
+                result = self._execute_buy(
+                    candle=candle,
+                    level=level,
+                    order_size_usd=config.order_size_usd,
+                    usdt_balance=usdt_balance,
+                )
+                if result is None:
+                    current_price = level
+                    continue
+                usdt_balance = result["usdt_balance"]
+                btc_balance += result["amount"]
+                inventory_lots.append((result["amount"], result["cost_basis_per_btc"]))
+                trade_log.append(result["trade"])
+                active_orders.pop(next_index, None)
+                active_orders[next_index + 1] = OrderSide.SELL.value
+                active_orders = self._maintain_active_window(config, level, active_orders)
+                current_price = level
+                continue
+
+            result = self._execute_sell(
+                candle=candle,
+                level=level,
+                order_size_usd=config.order_size_usd,
+                btc_balance=btc_balance,
+                inventory_lots=inventory_lots,
+            )
+            if result is None:
+                current_price = level
+                continue
+            usdt_balance += result["net_proceeds"]
+            btc_balance = result["btc_balance"]
+            realized_pnls.append(result["realized_pnl"])
+            trade_log.append(result["trade"])
+            active_orders.pop(next_index, None)
+            active_orders[next_index - 1] = OrderSide.BUY.value
+            active_orders = self._maintain_active_window(config, level, active_orders)
+            current_price = level
+
+    def _next_triggered_index(
+        self,
+        *,
+        config: InfinityGridBotConfig,
+        active_orders: dict[int, str],
+        current_price: float,
+        target_price: float,
+        moving_up: bool,
+    ) -> int | None:
+        best_index: int | None = None
+        best_level = inf if moving_up else -inf
+
+        for index, side in active_orders.items():
+            level = config.level_at(index)
+            if moving_up:
+                if side != OrderSide.SELL.value or not (current_price < level <= target_price):
+                    continue
+                if level < best_level:
+                    best_level = level
+                    best_index = index
+            else:
+                if side != OrderSide.BUY.value or not (target_price <= level < current_price):
+                    continue
+                if level > best_level:
+                    best_level = level
+                    best_index = index
+
+        return best_index
+
+    def _execute_buy(
+        self,
+        *,
+        candle: HistoricalCandle,
+        level: float,
+        order_size_usd: float,
+        usdt_balance: float,
+    ) -> dict[str, object] | None:
+        execution_price = round(level * (1 + self._slippage_rate), 2)
+        quote_notional = min(order_size_usd, usdt_balance / (1 + self._fee_rate))
+        if execution_price <= 0 or quote_notional <= 0:
+            return None
+
+        amount = round(quote_notional / execution_price, 6)
+        if amount <= 0:
+            return None
+        gross_cost = amount * execution_price
+        fee_usd = gross_cost * self._fee_rate
+        total_cost = gross_cost + fee_usd
+        if total_cost > usdt_balance:
+            return None
+
+        return {
+            "amount": amount,
+            "usdt_balance": round(usdt_balance - total_cost, 8),
+            "cost_basis_per_btc": total_cost / amount,
+            "trade": BacktestTrade(
+                timestamp=candle.open_time,
+                side=OrderSide.BUY.value,
+                level=round(level, 2),
+                execution_price=execution_price,
+                amount=amount,
+                notional_usd=round(gross_cost, 2),
+                fee_usd=round(fee_usd, 2),
+                realized_pnl_usd=None,
+                reason="Infinity grid buy level filled; the ladder re-armed a sell one step above.",
+            ),
+        }
+
+    def _execute_sell(
+        self,
+        *,
+        candle: HistoricalCandle,
+        level: float,
+        order_size_usd: float,
+        btc_balance: float,
+        inventory_lots: list[tuple[float, float]],
+    ) -> dict[str, object] | None:
+        execution_price = round(level * (1 - self._slippage_rate), 2)
+        target_amount = order_size_usd / execution_price
+        amount = round(min(target_amount, btc_balance), 6)
+        if amount <= 0:
+            return None
+
+        gross_proceeds = amount * execution_price
+        fee_usd = gross_proceeds * self._fee_rate
+        net_proceeds = gross_proceeds - fee_usd
+        cost_basis = self._consume_inventory(inventory_lots, amount)
+        realized_pnl = round(net_proceeds - cost_basis, 8)
+        return {
+            "btc_balance": round(btc_balance - amount, 8),
+            "net_proceeds": round(net_proceeds, 8),
+            "realized_pnl": realized_pnl,
+            "trade": BacktestTrade(
+                timestamp=candle.open_time,
+                side=OrderSide.SELL.value,
+                level=round(level, 2),
+                execution_price=execution_price,
+                amount=amount,
+                notional_usd=round(gross_proceeds, 2),
+                fee_usd=round(fee_usd, 2),
+                realized_pnl_usd=round(realized_pnl, 2),
+                reason="Infinity grid sell level filled; the ladder re-armed a buy one step below.",
+            ),
+        }
+
+    def _consume_inventory(self, inventory_lots: list[tuple[float, float]], amount: float) -> float:
+        remaining = amount
+        cost_basis = 0.0
+        while remaining > 0 and inventory_lots:
+            lot_amount, lot_cost = inventory_lots[0]
+            consumed = min(lot_amount, remaining)
+            cost_basis += consumed * lot_cost
+            lot_amount -= consumed
+            remaining -= consumed
+            if lot_amount <= 1e-9:
+                inventory_lots.pop(0)
+            else:
+                inventory_lots[0] = (lot_amount, lot_cost)
+        return cost_basis
+
+    def _candle_path(self, candle: HistoricalCandle) -> list[float]:
+        if candle.close >= candle.open:
+            return [candle.open, candle.low, candle.high, candle.close]
+        return [candle.open, candle.high, candle.low, candle.close]
 
     def _format_period_label(self, start: datetime, end: datetime) -> str:
         return f"{start:%Y-%m-%d} to {end:%Y-%m-%d}"

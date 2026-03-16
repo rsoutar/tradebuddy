@@ -1,0 +1,21 @@
+flowchart TD
+    classDef startEnd fill:#5b4fc4,stroke:#4338ca,stroke-width:2px,color:#ffffff
+    classDef process fill:#4a4a4a,stroke:#666666,stroke-width:2px,color:#ffffff
+    classDef decision fill:#8b5a2b,stroke:#a67c52,stroke-width:2px,color:#ffffff
+    classDef actionBuy fill:#1a5f4a,stroke:#2d8b6e,stroke-width:2px,color:#ffffff
+    classDef actionSell fill:#7c2d2d,stroke:#a53f3f,stroke-width:2px,color:#ffffff
+
+    Start([Set target allocation<br/>e.g. 50% BTC / 50% USDT]) --> Monitor[Monitor BTC price<br/>Track live allocation drift]
+    Monitor --> CheckDrift{Drift exceeded<br/>threshold?}
+    CheckDrift -->|No| Monitor
+    CheckDrift -->|Yes BTC rose<br/>above target| SellBTC[SELL BTC<br/>Reduce allocation]
+    CheckDrift -->|Yes BTC fell<br/>below target| BuyBTC[BUY BTC<br/>Increase allocation]
+    SellBTC --> BalanceRestored([Balance restored<br/>Return to monitoring])
+    BuyBTC --> BalanceRestored
+    BalanceRestored --> Monitor
+
+    class Start,BalanceRestored startEnd
+    class Monitor process
+    class CheckDrift decision
+    class SellBTC actionSell
+    class BuyBTC actionBuy

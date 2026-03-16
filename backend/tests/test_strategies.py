@@ -92,14 +92,16 @@ def test_rebalance_strategy_skips_when_portfolio_is_near_target():
 def test_infinity_grid_strategy_prepares_upward_grid_entries():
     strategy = InfinityGridStrategy(
         InfinityGridBotConfig(
-            lower_start_price=61000.0,
+            reference_price=68000.0,
             spacing_pct=1.5,
-            profit_take_pct=1.2,
-            trailing_stop_pct=7.0,
+            order_size_usd=100.0,
+            levels_per_side=3,
         )
     )
 
     evaluation = strategy.evaluate(SNAPSHOT, BALANCES)
 
     assert len(evaluation.orders) == 6
-    assert evaluation.metrics["anchor_price"] == SNAPSHOT.price
+    assert any(order.side.value == "buy" for order in evaluation.orders)
+    assert any(order.side.value == "sell" for order in evaluation.orders)
+    assert evaluation.metrics["reference_price"] == 68000.0

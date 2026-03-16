@@ -95,11 +95,65 @@ def test_paper_trading_endpoint_updates_dashboard_state(monkeypatch, tmp_path) -
 
 
 def test_backtest_endpoint_returns_latest_summary(monkeypatch, tmp_path) -> None:
-    client = build_client(monkeypatch, tmp_path)
+    history_dir = tmp_path / "history"
+    write_history_archive(
+        history_dir,
+        "BTCUSDT-15m-2024-01.zip",
+        [
+            [
+                "1704067200000",
+                "100.0",
+                "108.0",
+                "99.0",
+                "107.0",
+                "100.0",
+                "1704068099999",
+                "10000.0",
+                "100",
+                "50.0",
+                "5000.0",
+                "0",
+            ],
+            [
+                "1704068100000",
+                "107.0",
+                "114.0",
+                "106.0",
+                "112.0",
+                "100.0",
+                "1704068999999",
+                "10000.0",
+                "100",
+                "50.0",
+                "5000.0",
+                "0",
+            ],
+        ],
+    )
+    client = build_client(
+        monkeypatch,
+        tmp_path,
+        historical_loader=BinanceHistoricalKlineLoader(data_dir=history_dir),
+    )
 
     response = client.post(
         "/api/backtests/run",
-        json={"strategy": "infinity-grid", "user_id": "user-123", "user_name": "Test Trader"},
+        json={
+            "strategy": "infinity-grid",
+            "user_id": "user-123",
+            "user_name": "Test Trader",
+            "start_at": "2024-01-01T00:00:00+00:00",
+            "end_at": "2024-01-01T00:30:00+00:00",
+            "initial_capital_usd": 250,
+            "fee_rate": 0.0,
+            "slippage_rate": 0.0,
+            "infinity_config": {
+                "reference_price": 100,
+                "spacing_pct": 4,
+                "order_size_usd": 25,
+                "levels_per_side": 3,
+            },
+        },
     )
 
     assert response.status_code == 200
@@ -107,8 +161,11 @@ def test_backtest_endpoint_returns_latest_summary(monkeypatch, tmp_path) -> None
     summary = payload["dashboard"]["lastBacktest"]
     assert summary is not None
     assert summary["strategy"] == "infinity-grid"
-    assert summary["periodLabel"] == "Last 90 days"
-    assert summary["trades"] >= 8
+    assert summary["periodLabel"] == "2024-01-01 to 2024-01-01"
+    assert summary["trades"] >= 1
+    assert summary["startEquityUsd"] == 250.0
+    assert summary["feeRate"] == 0.0
+    assert summary["slippageRate"] == 0.0
 
 
 def test_grid_backtest_endpoint_replays_historical_candles(monkeypatch, tmp_path) -> None:
@@ -395,6 +452,37 @@ def test_create_rebalance_bot_persists_custom_config(monkeypatch, tmp_path) -> N
     assert active_bot["tradeCount"] > 0
     assert "Target BTC 60%" in active_bot["configSummary"]
     assert "3.5% drift threshold" in active_bot["configSummary"]
+
+
+def test_create_infinity_grid_bot_persists_custom_config(monkeypatch, tmp_path) -> None:
+    client = build_client(monkeypatch, tmp_path)
+
+    response = client.post(
+        "/api/bots",
+        json={
+            "strategy": "infinity-grid",
+            "infinity_config": {
+                "reference_price": 62000,
+                "spacing_pct": 1.5,
+                "order_size_usd": 125,
+                "levels_per_side": 5,
+            },
+            "user_id": "user-123",
+            "user_name": "Test Trader",
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["dashboard"]["botStatus"] == "paper-running"
+    assert len(payload["dashboard"]["activeStrategies"]) == 1
+
+    active_bot = payload["dashboard"]["activeStrategies"][0]
+    assert active_bot["strategy"] == "infinity-grid"
+    assert active_bot["tradeCount"] > 0
+    assert "Reference $62,000" in active_bot["configSummary"]
+    assert "5 levels per side" in active_bot["configSummary"]
+    assert "$125 per order" in active_bot["configSummary"]
 
 
 def test_trade_history_endpoint_returns_recorded_trades(monkeypatch, tmp_path) -> None:

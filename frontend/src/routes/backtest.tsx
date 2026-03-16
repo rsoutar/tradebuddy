@@ -138,6 +138,30 @@ function buildGridPreviewLevels(
   return levels
 }
 
+function buildInfinityPreviewLevels(lowerStartPrice: number, spacingPct: number, maxActiveGrids: number) {
+  if (
+    !Number.isFinite(lowerStartPrice) ||
+    lowerStartPrice <= 0 ||
+    !Number.isFinite(spacingPct) ||
+    spacingPct <= 0 ||
+    !Number.isInteger(maxActiveGrids) ||
+    maxActiveGrids < 2
+  ) {
+    return []
+  }
+
+  const spacingFactor = 1 + spacingPct / 100
+  const levels: number[] = []
+  let currentLevel = lowerStartPrice
+
+  for (let index = 0; index < maxActiveGrids; index += 1) {
+    levels.push(Number(currentLevel.toFixed(2)))
+    currentLevel *= spacingFactor
+  }
+
+  return levels
+}
+
 function MetricCard({
   label,
   value,
@@ -181,7 +205,9 @@ function BacktestPage() {
   const [dashboard, setDashboard] = useState<DashboardState>(loaderData.dashboard)
   const market = loaderData.market
   const initialWindow = defaultBacktestWindow()
-  const [selectedStrategy, setSelectedStrategy] = useState<StrategyKey>('grid')
+  const [selectedStrategy, setSelectedStrategy] = useState<StrategyKey>(
+    loaderData.dashboard.lastBacktest?.strategy ?? 'grid',
+  )
   const [startDate, setStartDate] = useState(initialWindow.start)
   const [endDate, setEndDate] = useState(initialWindow.end)
   const [capitalUsd, setCapitalUsd] = useState('250')
@@ -197,6 +223,12 @@ function BacktestPage() {
   const [targetBtcRatio, setTargetBtcRatio] = useState('50')
   const [rebalanceThresholdPct, setRebalanceThresholdPct] = useState('5')
   const [intervalMinutes, setIntervalMinutes] = useState('60')
+  const [infinityReferencePrice, setInfinityReferencePrice] = useState(() =>
+    Math.round(loaderData.market.price).toString(),
+  )
+  const [infinitySpacingPct, setInfinitySpacingPct] = useState('1.5')
+  const [infinityOrderSizeUsd, setInfinityOrderSizeUsd] = useState('100')
+  const [infinityLevelsPerSide, setInfinityLevelsPerSide] = useState('6')
   const [isRunning, setIsRunning] = useState(false)
   const [formError, setFormError] = useState<string>()
   const [successNote, setSuccessNote] = useState<string>()
@@ -254,6 +286,10 @@ function BacktestPage() {
     const parsedTargetRatio = Number.parseFloat(targetBtcRatio)
     const parsedThresholdPct = Number.parseFloat(rebalanceThresholdPct)
     const parsedIntervalMinutes = Number.parseInt(intervalMinutes, 10)
+    const parsedInfinityReferencePrice = Number.parseFloat(infinityReferencePrice)
+    const parsedInfinitySpacingPct = Number.parseFloat(infinitySpacingPct)
+    const parsedInfinityOrderSizeUsd = Number.parseFloat(infinityOrderSizeUsd)
+    const parsedInfinityLevelsPerSide = Number.parseInt(infinityLevelsPerSide, 10)
 
     if (!startDate || !endDate) {
       setFormError('Choose a backtest start and end date.')
@@ -310,8 +346,22 @@ function BacktestPage() {
         return
       }
     } else {
-      setFormError('Infinity Grid backtests are not wired to the backend yet.')
-      return
+      if (!Number.isFinite(parsedInfinityReferencePrice) || parsedInfinityReferencePrice <= 0) {
+        setFormError('Infinity Grid reference price must be greater than 0.')
+        return
+      }
+      if (!Number.isFinite(parsedInfinitySpacingPct) || parsedInfinitySpacingPct <= 0) {
+        setFormError('Infinity Grid spacing must be greater than 0.')
+        return
+      }
+      if (!Number.isFinite(parsedInfinityOrderSizeUsd) || parsedInfinityOrderSizeUsd <= 0) {
+        setFormError('Infinity Grid order size must be greater than 0.')
+        return
+      }
+      if (!Number.isInteger(parsedInfinityLevelsPerSide) || parsedInfinityLevelsPerSide < 1) {
+        setFormError('Levels per side must be a whole number greater than or equal to 1.')
+        return
+      }
     }
 
     try {
@@ -347,13 +397,24 @@ function BacktestPage() {
                   intervalMinutes: parsedIntervalMinutes,
                 }
               : undefined,
+          infinityConfig:
+            selectedStrategy === 'infinity-grid'
+              ? {
+                  referencePrice: parsedInfinityReferencePrice,
+                  spacingPct: parsedInfinitySpacingPct,
+                  orderSizeUsd: parsedInfinityOrderSizeUsd,
+                  levelsPerSide: parsedInfinityLevelsPerSide,
+                }
+              : undefined,
         },
       })
       setDashboard(nextDashboard)
       setSuccessNote(
         selectedStrategy === 'grid'
           ? 'Grid backtest completed with the latest historical replay from the backend.'
-          : 'Rebalance backtest completed with the latest historical replay from the backend.',
+          : selectedStrategy === 'rebalance'
+            ? 'Rebalance backtest completed with the latest historical replay from the backend.'
+            : 'Infinity Grid backtest completed with the latest historical replay from the backend.',
       )
     } catch (error) {
       setFormError(error instanceof Error ? error.message : 'Unable to run the backtest right now.')
@@ -374,9 +435,22 @@ function BacktestPage() {
   const parsedTargetRatio = Number.parseFloat(targetBtcRatio)
   const parsedThresholdPct = Number.parseFloat(rebalanceThresholdPct)
   const parsedIntervalMinutes = Number.parseInt(intervalMinutes, 10)
+  const parsedInfinityReference = Number.parseFloat(infinityReferencePrice)
+  const parsedInfinitySpacing = Number.parseFloat(infinitySpacingPct)
+  const parsedInfinityOrderSize = Number.parseFloat(infinityOrderSizeUsd)
+  const parsedInfinityGridCount = Number.parseInt(infinityLevelsPerSide, 10)
   const previewLevels = useMemo(
     () => buildGridPreviewLevels(parsedLowerPrice, parsedUpperPrice, parsedGridCount, parsedSpacingPct),
     [parsedGridCount, parsedLowerPrice, parsedSpacingPct, parsedUpperPrice],
+  )
+  const infinityPreviewLevels = useMemo(
+    () =>
+      buildInfinityPreviewLevels(
+        parsedInfinityReference,
+        parsedInfinitySpacing,
+        parsedInfinityGridCount,
+      ),
+    [parsedInfinityGridCount, parsedInfinityReference, parsedInfinitySpacing],
   )
   const deployableCapitalUsd = Number.isFinite(parsedCapitalUsd) && parsedCapitalUsd > 0 ? parsedCapitalUsd * 0.9 : 0
   const estimatedLevelBudgetUsd =
@@ -397,7 +471,8 @@ function BacktestPage() {
           controlTitle: 'Configure grid inputs',
           tradesDetail: 'Filled buy and sell grid executions.',
         }
-      : {
+      : selectedStrategy === 'rebalance'
+        ? {
           badge: 'Rebalance strategy live',
           title: 'Replay allocation drift, rebalance on schedule, and see how the portfolio held its shape.',
           description:
@@ -405,6 +480,14 @@ function BacktestPage() {
           controlTitle: 'Configure rebalance inputs',
           tradesDetail: 'Executed rebalance adjustments across the replay window.',
         }
+        : {
+            badge: 'Infinity Grid strategy live',
+            title: 'Harvest the chop with a two-sided geometric ladder that keeps re-arming around price.',
+            description:
+              'This path sends your reference price, spacing, order size, levels-per-side, capital, fees, and slippage assumptions to the backend replay runner for a classic infinity grid replay.',
+            controlTitle: 'Configure infinity grid inputs',
+            tradesDetail: 'Filled geometric buy and sell ladder crossings.',
+          }
 
   return (
     <ProtectedShell
@@ -523,6 +606,7 @@ function BacktestPage() {
               {([
                 ['grid', 'Grid', 'solar:widget-4-linear'],
                 ['rebalance', 'Rebalance', 'solar:refresh-circle-linear'],
+                ['infinity-grid', 'Infinity Grid', 'solar:maximize-square-linear'],
               ] as const).map(([key, label, icon]) => (
                 <button
                   key={key}
@@ -542,7 +626,11 @@ function BacktestPage() {
                   <div>
                     <p className="text-sm font-medium">{label}</p>
                     <p className="mt-1 text-xs text-zinc-500">
-                      {key === 'grid' ? 'Range-based ladder replay' : 'Allocation drift replay'}
+                      {key === 'grid'
+                        ? 'Range-based ladder replay'
+                        : key === 'rebalance'
+                          ? 'Allocation drift replay'
+                          : 'Two-sided geometric ladder replay'}
                     </p>
                   </div>
                   <Icon icon={icon} width={18} height={18} />
@@ -661,7 +749,7 @@ function BacktestPage() {
                     </div>
                   </div>
                 </>
-              ) : (
+              ) : selectedStrategy === 'rebalance' ? (
                 <>
                   <Field label="Target BTC allocation (%)">
                     <input
@@ -685,6 +773,41 @@ function BacktestPage() {
                       value={intervalMinutes}
                       onChange={(event) => setIntervalMinutes(event.target.value)}
                       placeholder="60"
+                    />
+                  </Field>
+                </>
+              ) : (
+                <>
+                  <Field label="Reference price">
+                    <input
+                      inputMode="decimal"
+                      value={infinityReferencePrice}
+                      onChange={(event) => setInfinityReferencePrice(event.target.value)}
+                      placeholder="102000"
+                    />
+                  </Field>
+                  <Field label="Spacing pct">
+                    <input
+                      inputMode="decimal"
+                      value={infinitySpacingPct}
+                      onChange={(event) => setInfinitySpacingPct(event.target.value)}
+                      placeholder="1.5"
+                    />
+                  </Field>
+                  <Field label="Order size (USD)">
+                    <input
+                      inputMode="decimal"
+                      value={infinityOrderSizeUsd}
+                      onChange={(event) => setInfinityOrderSizeUsd(event.target.value)}
+                      placeholder="100"
+                    />
+                  </Field>
+                  <Field label="Levels per side">
+                    <input
+                      inputMode="numeric"
+                      value={infinityLevelsPerSide}
+                      onChange={(event) => setInfinityLevelsPerSide(event.target.value)}
+                      placeholder="6"
                     />
                   </Field>
                 </>
@@ -720,7 +843,7 @@ function BacktestPage() {
                     isLightTheme={isLightTheme}
                   />
                 </>
-              ) : (
+              ) : selectedStrategy === 'rebalance' ? (
                 <>
                   <DerivedMetric
                     label="Target BTC Value"
@@ -738,6 +861,27 @@ function BacktestPage() {
                     label="Rebalance Cadence"
                     value={Number.isInteger(parsedIntervalMinutes) ? `${parsedIntervalMinutes} min` : '--'}
                     detail={`Trades trigger only when drift exceeds ${Number.isFinite(parsedThresholdPct) ? formatPercent(parsedThresholdPct, 1) : '--'}.`}
+                    isLightTheme={isLightTheme}
+                  />
+                </>
+              ) : (
+                <>
+                  <DerivedMetric
+                    label="Live Entry Bands"
+                    value={infinityPreviewLevels.length ? String(infinityPreviewLevels.length) : '--'}
+                    detail="Pending grid levels armed on one side of the market at any one time."
+                    isLightTheme={isLightTheme}
+                  />
+                  <DerivedMetric
+                    label="Configured Order Size"
+                    value={Number.isFinite(parsedInfinityOrderSize) ? formatCurrency(parsedInfinityOrderSize) : '--'}
+                    detail="Each grid crossing uses the same approximate notional size."
+                    isLightTheme={isLightTheme}
+                  />
+                  <DerivedMetric
+                    label="Reference Ladder"
+                    value={Number.isFinite(parsedInfinityReference) ? formatCurrency(parsedInfinityReference) : '--'}
+                    detail="The geometric grid is aligned around this base price, then extended above and below."
                     isLightTheme={isLightTheme}
                   />
                 </>
@@ -770,7 +914,7 @@ function BacktestPage() {
                 {isRunning ? 'Running backtest...' : 'Run backtest'}
               </button>
               <p className="text-xs uppercase tracking-[0.2em] text-zinc-500">
-                Grid and rebalance run against the backend now. Infinity Grid is next.
+                All three strategies now run against the backend replay engine.
               </p>
             </div>
           </form>
@@ -878,12 +1022,30 @@ function BacktestPage() {
               <AssumptionRow label="Initial capital" value={formatCurrency(backtest?.startEquityUsd ?? Number(capitalUsd))} />
               <AssumptionRow label="Fee rate" value={formatNumber(backtest?.feeRate ?? Number(feeRate), 4)} />
               <AssumptionRow label="Slippage rate" value={formatNumber(backtest?.slippageRate ?? Number(slippageRate), 4)} />
-              <AssumptionRow label="Range" value={`${numberFormatter.format(Number(lowerPrice))} - ${numberFormatter.format(Number(upperPrice))}`} />
-              <AssumptionRow label="Grid count" value={gridCount} />
-              <AssumptionRow label="Levels in range" value={previewLevels.length ? String(previewLevels.length) : '--'} />
-              <AssumptionRow label="Spacing" value={`${spacingPct}%`} />
-              <AssumptionRow label="Upper stop" value={stopAtUpperEnabled ? 'Enabled' : backtest?.upperPriceStopTriggered ? 'Triggered' : 'Disabled'} />
-              <AssumptionRow label="Stop-loss" value={stopLossEnabled ? `${stopLossPct}%` : backtest?.stopLossTriggered ? 'Triggered' : 'Disabled'} />
+              {selectedStrategy === 'grid' ? (
+                <>
+                  <AssumptionRow label="Range" value={`${numberFormatter.format(Number(lowerPrice))} - ${numberFormatter.format(Number(upperPrice))}`} />
+                  <AssumptionRow label="Grid count" value={gridCount} />
+                  <AssumptionRow label="Levels in range" value={previewLevels.length ? String(previewLevels.length) : '--'} />
+                  <AssumptionRow label="Spacing" value={`${spacingPct}%`} />
+                  <AssumptionRow label="Upper stop" value={stopAtUpperEnabled ? 'Enabled' : backtest?.upperPriceStopTriggered ? 'Triggered' : 'Disabled'} />
+                  <AssumptionRow label="Stop-loss" value={stopLossEnabled ? `${stopLossPct}%` : backtest?.stopLossTriggered ? 'Triggered' : 'Disabled'} />
+                </>
+              ) : selectedStrategy === 'rebalance' ? (
+                <>
+                  <AssumptionRow label="Target BTC" value={`${targetBtcRatio}%`} />
+                  <AssumptionRow label="Drift threshold" value={`${rebalanceThresholdPct}%`} />
+                  <AssumptionRow label="Check interval" value={`${intervalMinutes} min`} />
+                </>
+              ) : (
+                <>
+                  <AssumptionRow label="Reference price" value={numberFormatter.format(Number(infinityReferencePrice))} />
+                  <AssumptionRow label="Spacing" value={`${infinitySpacingPct}%`} />
+                  <AssumptionRow label="Order size" value={formatCurrency(Number(infinityOrderSizeUsd))} />
+                  <AssumptionRow label="Levels per side" value={infinityLevelsPerSide} />
+                  <AssumptionRow label="Live entry bands" value={infinityPreviewLevels.length ? String(infinityPreviewLevels.length) : '--'} />
+                </>
+              )}
             </div>
           </div>
 
@@ -919,7 +1081,11 @@ function BacktestPage() {
           <div>
             <p className="text-xs uppercase tracking-[0.24em] text-zinc-500">Trade Ledger</p>
             <h2 className="mt-2 text-2xl font-semibold tracking-tight text-zinc-100">
-              Filled grid executions
+              {selectedStrategy === 'grid'
+                ? 'Filled grid executions'
+                : selectedStrategy === 'rebalance'
+                  ? 'Filled rebalance executions'
+                  : 'Filled infinity grid executions'}
             </h2>
           </div>
           <div className="rounded-full border border-zinc-800 bg-zinc-900/70 px-3 py-1 text-xs uppercase tracking-[0.18em] text-zinc-400">

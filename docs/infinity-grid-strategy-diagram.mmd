@@ -1,0 +1,22 @@
+flowchart TD
+    classDef startEnd fill:#5b4fc4,stroke:#4338ca,stroke-width:2px,color:#ffffff
+    classDef process fill:#4a4a4a,stroke:#666666,stroke-width:2px,color:#ffffff
+    classDef decision fill:#8b5a2b,stroke:#a67c52,stroke-width:2px,color:#ffffff
+    classDef actionBuy fill:#1a5f4a,stroke:#2d8b6e,stroke-width:2px,color:#ffffff
+    classDef extend fill:#2d7c5a,stroke:#4ab88a,stroke-width:2px,color:#ffffff
+
+    Start([Set starting price<br/>and spacing %]) --> CalcGrid[Calculate grid levels<br/>Above current price]
+    CalcGrid --> Monitor[Monitor BTC price<br/>Track market movement]
+    Monitor --> CheckPrice{Price rose to<br/>next level?}
+    CheckPrice -->|Yes| BuyBTC[BUY BTC<br/>Extend grid upward]
+    CheckPrice -->|No| CheckTrailing{Price below<br/>trailing stop?}
+    BuyBTC --> ExtendGrid[Extend grid<br/>Add new upper levels]
+    ExtendGrid --> Monitor
+    CheckTrailing -->|Yes| ExitPos([Exit position<br/>Stop bot])
+    CheckTrailing -->|No| Monitor
+
+    class Start,ExitPos startEnd
+    class CalcGrid,ExtendGrid extend
+    class Monitor process
+    class CheckPrice,CheckTrailing decision
+    class BuyBTC actionBuy

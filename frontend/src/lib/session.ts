@@ -199,6 +199,13 @@ export type RebalanceBotInput = {
   intervalMinutes: number
 }
 
+export type InfinityGridBotInput = {
+  referencePrice: number
+  spacingPct: number
+  orderSizeUsd: number
+  levelsPerSide: number
+}
+
 export type BacktestInput = {
   strategy: StrategyKey
   startAt?: string
@@ -208,6 +215,7 @@ export type BacktestInput = {
   slippageRate?: number
   gridConfig?: GridBotInput
   rebalanceConfig?: RebalanceBotInput
+  infinityConfig?: InfinityGridBotInput
 }
 
 type SessionData = {
@@ -651,6 +659,14 @@ export const runBacktest = createServerFn({ method: 'POST' }).handler(
                 interval_minutes: input.rebalanceConfig.intervalMinutes,
               }
             : undefined,
+          infinity_config: input.infinityConfig
+            ? {
+                reference_price: input.infinityConfig.referencePrice,
+                spacing_pct: input.infinityConfig.spacingPct,
+                order_size_usd: input.infinityConfig.orderSizeUsd,
+                levels_per_side: input.infinityConfig.levelsPerSide,
+              }
+            : undefined,
           ...getUserScope(session.data.user),
         }),
       },
@@ -665,6 +681,7 @@ export const createBot = createServerFn({ method: 'POST' }).handler(async ({ dat
     strategy: StrategyKey
     gridConfig?: GridBotInput
     rebalanceConfig?: RebalanceBotInput
+    infinityConfig?: InfinityGridBotInput
   }
   const session = await useSession<SessionData>(getSessionConfig())
 
@@ -697,6 +714,14 @@ export const createBot = createServerFn({ method: 'POST' }).handler(async ({ dat
               target_btc_ratio: input.rebalanceConfig.targetBtcRatio,
               rebalance_threshold_pct: input.rebalanceConfig.rebalanceThresholdPct,
               interval_minutes: input.rebalanceConfig.intervalMinutes,
+            }
+          : undefined,
+        infinity_config: input.infinityConfig
+          ? {
+              reference_price: input.infinityConfig.referencePrice,
+              spacing_pct: input.infinityConfig.spacingPct,
+              order_size_usd: input.infinityConfig.orderSizeUsd,
+              levels_per_side: input.infinityConfig.levelsPerSide,
             }
           : undefined,
         ...getUserScope(session.data.user),
