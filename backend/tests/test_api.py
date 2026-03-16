@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import sqlite3
 
 from fastapi.testclient import TestClient
@@ -72,7 +73,7 @@ def test_dashboard_endpoint_returns_dashboard_payload(monkeypatch, tmp_path) -> 
         "rebalance",
         "infinity-grid",
     }
-    assert payload["dashboard"]["events"][0]["title"] == "Paper wallet ready"
+    assert payload["dashboard"]["events"] == []
 
 
 def test_swagger_endpoint_is_available(monkeypatch, tmp_path) -> None:
@@ -621,6 +622,53 @@ def test_grid_bot_cycle_does_not_fill_buy_limit_while_price_is_above_it(monkeypa
     assert filled_count == 0
 
 
+def test_grid_bot_cycle_skips_stale_snapshot_instead_of_using_mock_price(monkeypatch, tmp_path) -> None:
+    app = build_app(monkeypatch, tmp_path)
+    snapshot_path = tmp_path / "state" / "market_snapshot.json"
+
+    write_shared_snapshot(
+        snapshot_path,
+        MarketSnapshot(
+            symbol="BTC/USDT",
+            price=73800.0,
+            change_24h_pct=0.0,
+            volume_24h=0.0,
+            volatility_24h_pct=0.0,
+            trend="flat",
+        ),
+    )
+    app.create_bot(
+        StrategyType.GRID,
+        user_id="user-123",
+        user_name="Test Trader",
+        grid_config={
+            "lower_price": 60000,
+            "upper_price": 85000,
+            "grid_count": 30,
+            "spacing_pct": 2.0,
+            "stop_loss_enabled": False,
+        },
+    )
+    bot_id = app.paper_store.list_bot_instances(user_id="user-123")[0]["id"]
+
+    stale_payload = json.loads(snapshot_path.read_text())
+    stale_payload["written_at"] = 0
+    snapshot_path.write_text(json.dumps(stale_payload))
+
+    cycle = app.process_bot_cycle(bot_id)
+
+    assert cycle["filledOrders"] == []
+    assert cycle["skippedReason"] == "Fresh shared market snapshot unavailable."
+
+    database_path = tmp_path / "state" / "paper_trading.sqlite3"
+    with sqlite3.connect(database_path) as connection:
+        filled_count = connection.execute(
+            "SELECT COUNT(*) FROM paper_trades WHERE status = 'filled'"
+        ).fetchone()[0]
+
+    assert filled_count == 0
+
+
 def test_infinity_grid_bot_cycle_fills_buy_and_rearms_sell(monkeypatch, tmp_path) -> None:
     app = build_app(monkeypatch, tmp_path)
     snapshot_path = tmp_path / "state" / "market_snapshot.json"
@@ -749,6 +797,69 @@ def test_rebalance_bot_cycle_fills_order_and_clears_planned_when_target_reached(
     assert btc_balance > 0.0
 
 
+def test_rebalance_bot_cycle_fills_after_dip_and_rebound_between_polls(monkeypatch, tmp_path) -> None:
+    app = build_app(monkeypatch, tmp_path)
+    snapshot_path = tmp_path / "state" / "market_snapshot.json"
+
+    write_shared_snapshot(
+        snapshot_path,
+        MarketSnapshot(
+            symbol="BTC/USDT",
+            price=100.0,
+            change_24h_pct=0.0,
+            volume_24h=0.0,
+            volatility_24h_pct=0.0,
+            trend="flat",
+        ),
+    )
+    app.create_bot(
+        StrategyType.REBALANCE,
+        user_id="user-123",
+        user_name="Test Trader",
+        rebalance_config={
+            "target_btc_ratio": 0.5,
+            "rebalance_threshold_pct": 5.0,
+            "interval_minutes": 60,
+        },
+    )
+    bot_id = app.paper_store.list_bot_instances(user_id="user-123")[0]["id"]
+
+    write_shared_snapshot(
+        snapshot_path,
+        MarketSnapshot(
+            symbol="BTC/USDT",
+            price=99.8,
+            change_24h_pct=0.0,
+            volume_24h=0.0,
+            volatility_24h_pct=0.0,
+            trend="dip",
+        ),
+    )
+    write_shared_snapshot(
+        snapshot_path,
+        MarketSnapshot(
+            symbol="BTC/USDT",
+            price=100.2,
+            change_24h_pct=0.0,
+            volume_24h=0.0,
+            volatility_24h_pct=0.0,
+            trend="rebound",
+        ),
+    )
+    cycle = app.process_bot_cycle(bot_id)
+
+    assert len(cycle["filledOrders"]) == 1
+    assert cycle["filledOrders"][0]["side"] == "buy"
+
+    database_path = tmp_path / "state" / "paper_trading.sqlite3"
+    with sqlite3.connect(database_path) as connection:
+        filled_count = connection.execute(
+            "SELECT COUNT(*) FROM paper_trades WHERE status = 'filled'"
+        ).fetchone()[0]
+
+    assert filled_count == 1
+
+
 def test_trade_history_endpoint_returns_recorded_trades(monkeypatch, tmp_path) -> None:
     client = build_client(monkeypatch, tmp_path)
 
@@ -776,11 +887,11 @@ def test_trade_history_endpoint_returns_recorded_trades(monkeypatch, tmp_path) -
     assert response.status_code == 200
     payload = response.json()
     assert payload["summary"]["totalTrades"] > 0
-    assert payload["summary"]["plannedTrades"] == payload["summary"]["totalTrades"]
+    assert payload["summary"]["pendingTrades"] == payload["summary"]["totalTrades"]
     assert payload["summary"]["activeBotCount"] == 1
     assert payload["trades"][0]["botName"].startswith("Grid Bot #")
     assert payload["trades"][0]["strategy"] == "grid"
-    assert payload["trades"][0]["status"] == "planned"
+    assert payload["trades"][0]["status"] == "pending"
 
 
 def test_bot_history_tracks_multiple_active_bots(monkeypatch, tmp_path) -> None:

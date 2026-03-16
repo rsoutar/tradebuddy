@@ -76,6 +76,12 @@ PYTHONPATH=src python3 -m pytest
 $HOME/Library/Python/3.9/bin/ruff check src tests
 ```
 
+Reset all paper-trading state later with:
+
+```bash
+./scripts/reset_paper_state.sh
+```
+
 ## API Endpoints
 
 Default local server: `http://127.0.0.1:8000`

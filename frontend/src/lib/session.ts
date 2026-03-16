@@ -105,14 +105,14 @@ export type PaperTrade = {
   price: number
   notionalUsd: number
   rationale: string
-  status: string
+  status: 'pending' | 'filled' | 'stopped' | 'cancelled' | 'rejected' | 'expired' | 'failed' | string
   createdAt: string
 }
 
 export type TradeHistoryState = {
   summary: {
     totalTrades: number
-    plannedTrades: number
+    pendingTrades: number
     buyTrades: number
     sellTrades: number
     totalNotionalUsd: number

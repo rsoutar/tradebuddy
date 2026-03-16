@@ -26,7 +26,11 @@ from trading_bot.services.backtesting import (
 from trading_bot.services.exchange import CcxtExchangeClient, MockExchangeClient
 from trading_bot.services.historical_data import BinanceHistoricalKlineLoader
 from trading_bot.services.binance_ws import BinanceSpotWebSocketMarketData
-from trading_bot.services.market_data import MarketDataService, SharedSnapshotFileMarketData
+from trading_bot.services.market_data import (
+    MarketDataService,
+    SharedSnapshotFileMarketData,
+    read_shared_price_window,
+)
 from trading_bot.services.risk import RiskManager
 from trading_bot.settings import AppSettings, load_settings
 from trading_bot.strategies.grid import GridStrategy
@@ -309,63 +313,16 @@ class TradingBotApp:
         evaluation_data: list[dict[str, Any]],
         persisted_events: list[dict[str, Any]],
     ) -> list[dict[str, str]]:
-        events: list[dict[str, str]] = []
-        for item in persisted_events[:3]:
-            events.append(
-                {
-                    "id": item["id"],
-                    "tone": item["tone"],
-                    "title": item["title"],
-                    "detail": item["detail"],
-                    "timeLabel": self._format_time_label(item["timestamp"]),
-                }
-            )
-
-        events.append(
+        return [
             {
-                "id": "evt-market",
-                "tone": "positive" if snapshot.change_24h_pct >= 0 else "warning",
-                "title": "Market snapshot refreshed",
-                "detail": (
-                    f"{snapshot.symbol} is at ${snapshot.price:,.2f} with "
-                    f"{snapshot.change_24h_pct:+.2f}% 24h change."
-                ),
-                "timeLabel": "Now",
+                "id": item["id"],
+                "tone": item["tone"],
+                "title": item["title"],
+                "detail": item["detail"],
+                "timeLabel": self._format_time_label(item["timestamp"]),
             }
-        )
-        events.append(
-            {
-                "id": "evt-volatility",
-                "tone": "warning" if snapshot.volatility_24h_pct >= 3 else "neutral",
-                "title": "Volatility monitor updated",
-                "detail": (
-                    f"24h volatility is {snapshot.volatility_24h_pct:.2f}% and the trend reads "
-                    f"as {snapshot.trend}."
-                ),
-                "timeLabel": "Now",
-            }
-        )
-
-        risk_warning = next(
-            (
-                warning
-                for item in evaluation_data
-                for warning in item["risk"].warnings
-            ),
-            None,
-        )
-        if risk_warning:
-            events.append(
-                {
-                    "id": "evt-risk",
-                    "tone": "warning",
-                    "title": "Risk envelope needs attention",
-                    "detail": risk_warning,
-                    "timeLabel": "Now",
-                }
-            )
-
-        return events[:5]
+            for item in persisted_events[:5]
+        ]
 
     def _capital_usd(self, balances: list[Balance], snapshot: MarketSnapshot) -> float:
         total = 0.0
@@ -381,6 +338,11 @@ class TradingBotApp:
             Balance(asset="BTC", free=account_state["btc_balance"], locked=0.0),
             Balance(asset="USDT", free=account_state["usd_balance"], locked=0.0),
         ]
+
+    def _process_snapshot(self, symbol: str) -> Optional[MarketSnapshot]:
+        if not self._enable_market_stream and isinstance(self.exchange_client, MockExchangeClient):
+            return SharedSnapshotFileMarketData(self._shared_snapshot_path()).get_snapshot(symbol)
+        return self.market_data.get_snapshot(symbol)
 
     def _executable_orders(
         self,
@@ -412,9 +374,28 @@ class TradingBotApp:
         if bot is None:
             raise ValueError(f"Unknown bot id: {bot_id}")
 
-        snapshot = self.market_data.get_snapshot(bot["symbol"])
+        snapshot = self._process_snapshot(bot["symbol"])
+        if snapshot is None:
+            refreshed_bot = self.paper_store.get_bot_instance(bot_id=bot_id)
+            return {
+                "snapshot": None,
+                "balances": [],
+                "filledOrders": [],
+                "lastTradeAt": refreshed_bot["lastTradeAt"] if refreshed_bot is not None else None,
+                "evaluation": None,
+                "skippedReason": "Fresh shared market snapshot unavailable.",
+            }
         filled_orders: list[dict[str, Any]] = []
         strategy_type = StrategyType(bot["strategy"])
+        price_window = read_shared_price_window(
+            self._shared_snapshot_path(),
+            bot["symbol"],
+            since=bot["heartbeatAt"] or bot["createdAt"],
+        ) or {
+            "low_price": snapshot.price,
+            "high_price": snapshot.price,
+            "current_price": snapshot.price,
+        }
 
         if strategy_type is StrategyType.GRID:
             filled_orders = self.paper_store.fill_triggered_grid_orders(
@@ -425,7 +406,8 @@ class TradingBotApp:
         else:
             filled_orders = self.paper_store.fill_triggered_orders(
                 bot_id=bot_id,
-                market_price=snapshot.price,
+                low_price=price_window["low_price"],
+                high_price=price_window["high_price"],
                 timestamp=self._timestamp(),
             )
 
@@ -911,7 +893,7 @@ class TradingBotApp:
             "generatedAt": self._timestamp(),
             "summary": {
                 "totalTrades": len(trades),
-                "plannedTrades": sum(1 for item in trades if item["status"] == "planned"),
+                "pendingTrades": sum(1 for item in trades if item["status"] == "pending"),
                 "buyTrades": buy_trades,
                 "sellTrades": sell_trades,
                 "totalNotionalUsd": total_notional_usd,

@@ -177,16 +177,6 @@ class PaperTradingStore:
                 timestamp,
             ),
         )
-        self._insert_event(
-            connection,
-            user_id=user_id,
-            event_type="initial_deposit",
-            tone="positive",
-            title="Paper wallet ready",
-            detail="Initial deposit of $100.00 credited to the paper account.",
-            amount_usd=DEFAULT_INITIAL_DEPOSIT_USD,
-            timestamp=timestamp,
-        )
         return connection.execute(
             "SELECT * FROM paper_accounts WHERE user_id = ?",
             (user_id,),
@@ -708,7 +698,8 @@ class PaperTradingStore:
         self,
         *,
         bot_id: str,
-        market_price: float,
+        low_price: float,
+        high_price: float,
         timestamp: str,
     ) -> list[dict[str, Any]]:
         numeric_id = int(bot_id.replace("bot-", "", 1))
@@ -756,9 +747,9 @@ class PaperTradingStore:
                 amount = float(row["amount"])
                 notional_usd = round(float(row["notional_usd"]), 2)
                 is_triggered = (
-                    side == OrderSide.BUY.value and market_price <= price
+                    side == OrderSide.BUY.value and low_price <= price
                 ) or (
-                    side == OrderSide.SELL.value and market_price >= price
+                    side == OrderSide.SELL.value and high_price >= price
                 )
                 if not is_triggered:
                     continue
@@ -1400,7 +1391,7 @@ class PaperTradingStore:
                 "price": round(float(row["price"]), 2),
                 "notionalUsd": round(float(row["notional_usd"]), 2),
                 "rationale": row["rationale"],
-                "status": row["status"],
+                "status": "pending" if row["status"] == "planned" else row["status"],
                 "createdAt": row["created_at"],
             }
             for row in rows

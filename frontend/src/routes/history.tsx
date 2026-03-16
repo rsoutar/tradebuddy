@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { Icon } from '@iconify/react'
 import { createFileRoute } from '@tanstack/react-router'
 import { MarketConnectionBadge } from '../components/market-connection-badge'
@@ -51,6 +51,16 @@ function formatDateTime(timestamp?: string) {
 
 function formatAmount(value: number) {
   return value.toFixed(value < 1 ? 6 : 4)
+}
+
+function formatTradeStatus(status: PaperTrade['status']) {
+  if (status === 'pending') return 'Pending'
+  if (status === 'filled') return 'Filled'
+  return status
+    .split(/[-_\s]+/)
+    .filter(Boolean)
+    .map((segment) => segment.charAt(0).toUpperCase() + segment.slice(1))
+    .join(' ')
 }
 
 function formatTimeAgo(timestamp?: string) {
@@ -134,10 +144,17 @@ function TradeHistoryPage() {
   const [searchValue, setSearchValue] = useState('')
   const [strategyFilter, setStrategyFilter] = useState<'all' | StrategyKey>('all')
   const [sideFilter, setSideFilter] = useState<'all' | 'buy' | 'sell'>('all')
+  const [statusFilter, setStatusFilter] = useState<'all' | PaperTrade['status']>('all')
   const [botFilter, setBotFilter] = useState<'all' | string>('all')
+  const [page, setPage] = useState(1)
+  const pageSize = 20
 
   const strategyOptions = useMemo(
     () => Array.from(new Set(history.trades.map((trade) => trade.strategy))),
+    [history.trades],
+  )
+  const statusOptions = useMemo(
+    () => Array.from(new Set(history.trades.map((trade) => trade.status))),
     [history.trades],
   )
   const botOptions = useMemo(
@@ -150,6 +167,7 @@ function TradeHistoryPage() {
     return history.trades.filter((trade) => {
       if (strategyFilter !== 'all' && trade.strategy !== strategyFilter) return false
       if (sideFilter !== 'all' && trade.side !== sideFilter) return false
+      if (statusFilter !== 'all' && trade.status !== statusFilter) return false
       if (botFilter !== 'all' && trade.botName !== botFilter) return false
       if (!needle) return true
 
@@ -157,7 +175,27 @@ function TradeHistoryPage() {
         .toLowerCase()
         .includes(needle)
     })
-  }, [botFilter, history.trades, searchValue, sideFilter, strategyFilter])
+  }, [botFilter, history.trades, searchValue, sideFilter, statusFilter, strategyFilter])
+
+  useEffect(() => {
+    setPage(1)
+  }, [searchValue, strategyFilter, sideFilter, statusFilter, botFilter])
+
+  const totalPages = Math.max(1, Math.ceil(filteredTrades.length / pageSize))
+
+  useEffect(() => {
+    if (page > totalPages) {
+      setPage(totalPages)
+    }
+  }, [page, totalPages])
+
+  const paginatedTrades = useMemo(() => {
+    const startIndex = (page - 1) * pageSize
+    return filteredTrades.slice(startIndex, startIndex + pageSize)
+  }, [filteredTrades, page])
+
+  const visibleRangeStart = filteredTrades.length ? (page - 1) * pageSize + 1 : 0
+  const visibleRangeEnd = filteredTrades.length ? visibleRangeStart + paginatedTrades.length - 1 : 0
 
   return (
     <ProtectedShell
@@ -185,12 +223,12 @@ function TradeHistoryPage() {
         <div className="rounded-xl border border-zinc-800/60 bg-zinc-900/40 p-6">
           <p className="text-xs uppercase tracking-[0.24em] text-zinc-500">Ledger Overview</p>
           <h2 className="mt-3 text-3xl font-medium tracking-tight text-zinc-100">
-            Verify every planned grid order before trusting the behavior.
+            Audit every pending and filled paper order before trusting the behavior.
           </h2>
           <p className="mt-4 max-w-3xl text-sm leading-7 text-zinc-400">
             This table is read directly from `paper_trades` in SQLite, so you can inspect the
-            ladder, side distribution, size progression, and the exact rationale attached to each
-            generated trade row.
+            ladder, side distribution, size progression, fill status, and the exact rationale
+            attached to each generated trade row.
           </p>
         </div>
 
@@ -209,8 +247,8 @@ function TradeHistoryPage() {
               <strong className="text-zinc-100">{history.summary.paperRunCount}</strong>
             </div>
             <div className="flex items-center justify-between rounded-lg border border-zinc-800 bg-zinc-950/70 px-4 py-3">
-              <span>Planned trade rows</span>
-              <strong className="text-zinc-100">{history.summary.plannedTrades}</strong>
+              <span>Pending trade rows</span>
+              <strong className="text-zinc-100">{history.summary.pendingTrades}</strong>
             </div>
           </div>
         </div>
@@ -224,7 +262,7 @@ function TradeHistoryPage() {
           value={String(history.summary.totalTrades)}
         />
         <SummaryCard
-          detail="Combined USD notional across the planned order ledger."
+          detail="Combined USD notional across the current paper-trade ledger."
           icon="solar:wallet-money-linear"
           label="Total Notional"
           value={formatCurrency(history.summary.totalNotionalUsd)}
@@ -249,10 +287,10 @@ function TradeHistoryPage() {
           <div>
             <p className="text-xs uppercase tracking-[0.24em] text-zinc-500">Filters</p>
             <h2 className="mt-2 text-2xl font-medium tracking-tight text-zinc-100">
-              Audit the ladder by bot, side, or rationale
+              Audit the ledger by bot, status, side, or rationale
             </h2>
           </div>
-          <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+          <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-5">
             <label className="flex flex-col gap-2 text-sm text-zinc-500">
               Search
               <input
@@ -291,6 +329,21 @@ function TradeHistoryPage() {
               </select>
             </label>
             <label className="flex flex-col gap-2 text-sm text-zinc-500">
+              Status
+              <select
+                className="rounded-lg border border-zinc-800 bg-zinc-950/70 px-4 py-3 text-zinc-100 outline-none transition focus:border-zinc-600 focus:ring-1 focus:ring-zinc-600"
+                value={statusFilter}
+                onChange={(event) => setStatusFilter(event.target.value as 'all' | PaperTrade['status'])}
+              >
+                <option value="all">All statuses</option>
+                {statusOptions.map((status) => (
+                  <option key={status} value={status}>
+                    {formatTradeStatus(status)}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className="flex flex-col gap-2 text-sm text-zinc-500">
               Bot
               <select
                 className="rounded-lg border border-zinc-800 bg-zinc-950/70 px-4 py-3 text-zinc-100 outline-none transition focus:border-zinc-600 focus:ring-1 focus:ring-zinc-600"
@@ -305,6 +358,34 @@ function TradeHistoryPage() {
                 ))}
               </select>
             </label>
+          </div>
+        </div>
+
+        <div className="mt-6 flex flex-col gap-3 border-b border-zinc-800/40 px-1 pb-4 text-sm text-zinc-500 sm:flex-row sm:items-center sm:justify-between">
+          <div>
+            Showing {visibleRangeStart}-{visibleRangeEnd} of {filteredTrades.length} filtered trade
+            {filteredTrades.length === 1 ? '' : 's'}
+          </div>
+          <div className="flex items-center gap-2">
+            <button
+              className="rounded-lg border border-zinc-800 bg-zinc-950/70 px-3 py-2 text-zinc-300 transition hover:border-zinc-700 hover:text-zinc-100 disabled:cursor-not-allowed disabled:opacity-40"
+              disabled={page <= 1}
+              onClick={() => setPage((currentPage) => Math.max(1, currentPage - 1))}
+              type="button"
+            >
+              Previous
+            </button>
+            <span className="rounded-lg border border-zinc-800/80 bg-zinc-950/70 px-3 py-2 text-zinc-200">
+              Page {page} of {totalPages}
+            </span>
+            <button
+              className="rounded-lg border border-zinc-800 bg-zinc-950/70 px-3 py-2 text-zinc-300 transition hover:border-zinc-700 hover:text-zinc-100 disabled:cursor-not-allowed disabled:opacity-40"
+              disabled={page >= totalPages}
+              onClick={() => setPage((currentPage) => Math.min(totalPages, currentPage + 1))}
+              type="button"
+            >
+              Next
+            </button>
           </div>
         </div>
 
@@ -326,7 +407,7 @@ function TradeHistoryPage() {
                   </tr>
                 </thead>
                 <tbody>
-                  {filteredTrades.map((trade, index) => (
+                  {paginatedTrades.map((trade, index) => (
                     <tr
                       className={cx(
                         'border-t border-zinc-800/30 align-top',
@@ -377,8 +458,15 @@ function TradeHistoryPage() {
                         </div>
                       </td>
                       <td className="px-5 py-4">
-                        <span className="inline-flex rounded-full bg-zinc-800 px-3 py-1 text-xs font-semibold uppercase tracking-[0.16em] text-zinc-300">
-                          {trade.status}
+                        <span
+                          className={cx(
+                            'inline-flex rounded-full px-3 py-1 text-xs font-semibold uppercase tracking-[0.16em]',
+                            trade.status === 'filled'
+                              ? 'bg-emerald-500/12 text-emerald-300'
+                              : 'bg-amber-500/12 text-amber-200',
+                          )}
+                        >
+                          {formatTradeStatus(trade.status)}
                         </span>
                       </td>
                     </tr>
