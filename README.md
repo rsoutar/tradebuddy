@@ -99,6 +99,8 @@ docker build -t ghcr.io/rsoutar/tradebuddy:latest .
 
 Merges to `main` also trigger the GitHub Actions workflow in [`.github/workflows/publish-image.yml`](.github/workflows/publish-image.yml), which rebuilds this root image and publishes it to `ghcr.io/rsoutar/tradebuddy`.
 
+The publish workflow pushes a multi-arch image for both `linux/amd64` and `linux/arm64`, so Apple Silicon hosts can pull `:latest` without a platform override after the next successful publish.
+
 ## Environment
 
 The root [`.env.example`](.env.example) contains the shared defaults used by local development.
