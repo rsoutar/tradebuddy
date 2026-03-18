@@ -1,11 +1,15 @@
 from __future__ import annotations
 
+import logging
 import os
 import time
 
 from trading_bot.app import TradingBotApp
+from trading_bot.error_utils import summarize_exception
 from trading_bot.runtime import utc_timestamp
 from trading_bot.settings import load_settings
+
+logger = logging.getLogger(__name__)
 
 
 class BotWorkerRunner:
@@ -46,9 +50,10 @@ class BotWorkerRunner:
                 )
                 time.sleep(self._poll_interval_seconds)
         except Exception as exc:
+            logger.exception("Bot worker crashed for %s", self._bot_id)
             self._app.paper_store.mark_bot_crashed(
                 bot_id=self._bot_id,
-                error=str(exc),
+                error=summarize_exception(exc),
                 timestamp=utc_timestamp(),
             )
             raise

@@ -100,6 +100,11 @@ function formatTimeAgo(timestamp?: string) {
   return formatDateTime(timestamp)
 }
 
+function getCrashReason(bot: BotRun) {
+  if (bot.status !== 'crashed') return undefined
+  return bot.lastError?.trim() || 'No crash reason was recorded for this run.'
+}
+
 function BotCard({
   bot,
   mode,
@@ -112,7 +117,8 @@ function BotCard({
   const meta = strategyMeta[bot.strategy]
   const isActive = mode === 'active'
   const isStopping = isActive && bot.desiredStatus === 'stopped'
-  const isInteractive = isActive && typeof onInspect === 'function'
+  const isInteractive = typeof onInspect === 'function'
+  const crashReason = getCrashReason(bot)
   const rootClassName = cx(
     'rounded-2xl border border-zinc-800/60 bg-zinc-900/40 p-6',
     isInteractive && 'w-full text-left transition hover:border-zinc-700 hover:bg-zinc-900/60 focus:outline-none focus:ring-2 focus:ring-emerald-400/40',
@@ -208,11 +214,24 @@ function BotCard({
         </div>
       </div>
 
+      {crashReason ? (
+        <div className="mt-6 rounded-xl border border-rose-500/25 bg-rose-500/10 px-4 py-3 text-sm">
+          <p className="text-xs uppercase tracking-[0.18em] text-rose-200/80">Crash reason</p>
+          <p className="mt-2 break-words leading-6 text-rose-100">{crashReason}</p>
+        </div>
+      ) : null}
+
       {isInteractive ? (
         <div className="mt-6 flex items-center justify-between rounded-xl border border-zinc-800/70 bg-zinc-950/40 px-4 py-3 text-sm text-zinc-400">
-          <span>{isStopping ? 'Stop has been requested. Open controls to monitor it.' : 'Open NAV chart and controls.'}</span>
+          <span>
+            {isActive
+              ? isStopping
+                ? 'Stop has been requested. Open controls to monitor it.'
+                : 'Open NAV chart and controls.'
+              : 'Open run details and latest crash information.'}
+          </span>
           <span className="inline-flex items-center gap-2 font-medium text-zinc-200">
-            Inspect
+            {isActive ? 'Inspect' : 'Details'}
             <Icon icon="solar:alt-arrow-right-linear" width={16} height={16} />
           </span>
         </div>
@@ -222,7 +241,7 @@ function BotCard({
 
   if (isInteractive) {
     return (
-      <button aria-haspopup="dialog" className={rootClassName} type="button" onClick={() => onInspect(bot)}>
+      <button aria-haspopup="dialog" className={rootClassName} type="button" onClick={() => onInspect?.(bot)}>
         {cardContent}
       </button>
     )
@@ -382,7 +401,11 @@ function BotsPage() {
           {activity.previousBots.length ? (
             <div className="grid gap-4 xl:grid-cols-2">
               {activity.previousBots.map((bot) => (
-                <BotCard bot={bot} key={bot.id} mode="previous" />
+                <BotCard bot={bot} key={bot.id} mode="previous" onInspect={(nextBot) => {
+                  setStopError(undefined)
+                  setStopFeedback(undefined)
+                  setSelectedBotId(nextBot.id)
+                }} />
               ))}
             </div>
           ) : (

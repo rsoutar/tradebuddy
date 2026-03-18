@@ -105,6 +105,11 @@ function buildEstimatedNavSeries(bot: ControllableBot): BacktestEquityPoint[] {
   return points
 }
 
+function getCrashReason(bot?: ControllableBot) {
+  if (!bot || bot.status !== 'crashed') return undefined
+  return bot.lastError?.trim() || 'No crash reason was recorded for this run.'
+}
+
 export function BotControlModal({
   bot,
   isStopping,
@@ -124,6 +129,7 @@ export function BotControlModal({
   const isLightTheme = effectiveTheme === 'light'
   const navData = useMemo(() => (bot ? buildEstimatedNavSeries(bot) : []), [bot])
   const estimatedCurrentNav = navData[navData.length - 1]?.equity ?? 0
+  const crashReason = getCrashReason(bot)
 
   useEffect(() => {
     if (!bot) return undefined
@@ -275,6 +281,13 @@ export function BotControlModal({
                   <p className="mt-2 text-sm font-medium text-zinc-100">{formatTimeAgo(bot.lastTradeAt)}</p>
                 </div>
               </div>
+
+              {crashReason ? (
+                <div className="mt-5 rounded-xl border border-rose-500/25 bg-rose-500/10 px-4 py-3">
+                  <p className="text-xs uppercase tracking-[0.18em] text-rose-200/80">Crash reason</p>
+                  <p className="mt-2 break-words text-sm leading-6 text-rose-100">{crashReason}</p>
+                </div>
+              ) : null}
 
               {error ? (
                 <div className="mt-5 rounded-xl border border-rose-500/20 bg-rose-500/10 px-4 py-3 text-sm text-rose-300">

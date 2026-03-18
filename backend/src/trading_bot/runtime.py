@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import os
 import signal
 import subprocess
@@ -9,6 +10,8 @@ from typing import Optional
 
 from trading_bot.paper_store import PaperTradingStore
 from trading_bot.settings import AppSettings
+
+logger = logging.getLogger(__name__)
 
 
 def utc_timestamp() -> str:
@@ -84,6 +87,7 @@ class BotProcessManager:
             if bot["desiredStatus"] == "stopped":
                 self._paper_store.mark_bot_stopped(bot_id=bot_id, timestamp=utc_timestamp())
             else:
+                logger.error("Bot worker process exited unexpectedly for %s (pid=%s)", bot_id, pid)
                 self._paper_store.mark_bot_crashed(
                     bot_id=bot_id,
                     error="Bot worker process exited unexpectedly.",

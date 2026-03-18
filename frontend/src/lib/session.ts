@@ -70,6 +70,7 @@ export type ActiveStrategy = {
   startedAt: string
   updatedAt: string
   lastTradeAt?: string
+  lastError?: string | null
 }
 
 export type BotRun = {
@@ -97,6 +98,7 @@ export type BotRun = {
   updatedAt: string
   lastTradeAt?: string
   stoppedAt?: string
+  lastError?: string | null
 }
 
 export type PaperTrade = {
