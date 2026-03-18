@@ -125,7 +125,7 @@ Important frontend variables:
 - `LINE_CHANNEL_ID` and `LINE_CHANNEL_SECRET` enable the live LINE Login flow
 - `LINE_REDIRECT_URI` is optional; when omitted, the frontend derives it from the current origin
 
-If the LINE variables are unset, the frontend falls back to demo authentication for local development.
+If `AUTH_SESSION_SECRET` is unset, the app falls back to a built-in development secret. If the LINE variables are unset, the frontend falls back to demo authentication for local development.
 
 ## Backend Commands
 
