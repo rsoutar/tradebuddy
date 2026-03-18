@@ -52,6 +52,7 @@ function RootComponent() {
     select: (state) => state.location.pathname,
   })
   const isProtectedRoute = isProtectedPathname(pathname)
+  const isLandingPage = pathname === '/'
 
   async function handleLogout() {
     try {
@@ -68,80 +69,84 @@ function RootComponent() {
       <ThemeProvider>
         <RootDocument>
           {isProtectedRoute ? (
-          <main className="dashboard-route-main">
-            <Outlet />
-          </main>
-        ) : (
-          <div className="app-shell">
-            <div className="ambient ambient-a" />
-            <div className="ambient ambient-b" />
-            <div className="ambient ambient-c" />
-            <header className="topbar">
-              <Link className="brand" to="/">
-                <span className="brand-mark">O</span>
-                <div>
-                  <p className="eyebrow">Oscar Trading Bot</p>
-                  <h1>LINE-authenticated control room</h1>
-                </div>
-              </Link>
-              {showAppNav ? (
-                <nav className="nav">
-                  <Link to="/" activeProps={{ className: 'active' }} activeOptions={{ exact: true }}>
-                    Home
-                  </Link>
-                  <Link to="/dashboard" activeProps={{ className: 'active' }}>
-                    Dashboard
-                  </Link>
-                  <Link to="/onboarding" activeProps={{ className: 'active' }}>
-                    Setup
-                  </Link>
-                  <Link to="/bots" activeProps={{ className: 'active' }}>
-                    Strategies
-                  </Link>
-                  <Link to="/history" activeProps={{ className: 'active' }}>
-                    History
-                  </Link>
-                  <Link to="/ai" activeProps={{ className: 'active' }}>
-                    Research
-                  </Link>
-                </nav>
-              ) : (
-                <div aria-hidden="true" />
-              )}
-              <div className="topbar-actions">
-                {viewer.authenticated ? (
-                  <>
-                    <div className="status-pill">
-                      <span className="status-dot" aria-hidden="true" />
-                      {`Signed in as ${viewer.user?.displayName}`}
-                    </div>
-                    <button
-                      type="button"
-                      className="secondary-button"
-                      onClick={() => {
-                        void handleLogout()
-                      }}
-                      disabled={isLoggingOut}
-                    >
-                      {isLoggingOut ? 'Logging out...' : 'Log out'}
-                    </button>
-                  </>
-                ) : (
-                  <Link className="primary-link" to="/auth/line/start">
-                    Sign in
-                  </Link>
-                )}
-              </div>
-            </header>
-            <main className="main-content">
+            <main className="dashboard-route-main">
               <Outlet />
             </main>
-            <div className="bottom-note">
-              <p className="eyebrow">Live focus</p>
-              <strong>LINE sign-in, paper-trading controls, backtests, and bot health in one place.</strong>
+          ) : isLandingPage ? (
+            <Outlet />
+          ) : (
+            <div className="app-shell">
+              <div className="ambient ambient-a" />
+              <div className="ambient ambient-b" />
+              <div className="ambient ambient-c" />
+              <header className="topbar">
+                <Link className="brand" to="/">
+                  <span className="brand-mark">O</span>
+                  <div>
+                    <p className="eyebrow">Oscar Trading Bot</p>
+                    <h1>LINE-authenticated control room</h1>
+                  </div>
+                </Link>
+                {showAppNav ? (
+                  <nav className="nav">
+                    <Link to="/" activeProps={{ className: 'active' }} activeOptions={{ exact: true }}>
+                      Home
+                    </Link>
+                    <Link to="/dashboard" activeProps={{ className: 'active' }}>
+                      Dashboard
+                    </Link>
+                    <Link to="/onboarding" activeProps={{ className: 'active' }}>
+                      Setup
+                    </Link>
+                    <Link to="/bots" activeProps={{ className: 'active' }}>
+                      Strategies
+                    </Link>
+                    <Link to="/history" activeProps={{ className: 'active' }}>
+                      History
+                    </Link>
+                    <Link to="/ai" activeProps={{ className: 'active' }}>
+                      Research
+                    </Link>
+                  </nav>
+                ) : (
+                  <div aria-hidden="true" />
+                )}
+                <div className="topbar-actions">
+                  {viewer.authenticated ? (
+                    <>
+                      <div className="status-pill">
+                        <span className="status-dot" aria-hidden="true" />
+                        {`Signed in as ${viewer.user?.displayName}`}
+                      </div>
+                      <button
+                        type="button"
+                        className="secondary-button"
+                        onClick={() => {
+                          void handleLogout()
+                        }}
+                        disabled={isLoggingOut}
+                      >
+                        {isLoggingOut ? 'Logging out...' : 'Log out'}
+                      </button>
+                    </>
+                  ) : (
+                    <Link className="primary-link" to="/auth/line/start">
+                      Sign in
+                    </Link>
+                  )}
+                </div>
+              </header>
+              <main className="main-content">
+                <Outlet />
+              </main>
+              <div className="bottom-note">
+                <p className="eyebrow">Live focus</p>
+                <strong>
+                  LINE sign-in, paper-trading controls, backtests, and bot health in one place.
+                </strong>
+              </div>
             </div>
-          </div>
-        )}
+          )}
         <TanStackRouterDevtools position="bottom-right" />
         </RootDocument>
       </ThemeProvider>
@@ -154,10 +159,14 @@ function RootDocument({ children }: Readonly<{ children: ReactNode }>) {
     select: (state) => state.location.pathname,
   })
   const isProtected = isProtectedPathname(pathname)
+  const isLandingPage = pathname === '/'
   const { effectiveTheme } = useTheme()
 
-  // For protected routes, use the effective theme; for public routes, use app-body
-  const bodyClassName = isProtected ? `${effectiveTheme}-dashboard-body` : 'app-body'
+  const bodyClassName = isProtected
+    ? `${effectiveTheme}-dashboard-body`
+    : isLandingPage
+      ? 'landing-body'
+      : 'app-body'
 
   return (
     <html lang="en">

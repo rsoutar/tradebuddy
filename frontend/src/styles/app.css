@@ -47,6 +47,13 @@ body.app-body {
     var(--background);
 }
 
+body.landing-body {
+  background: #09090b;
+  color: #d4d4d8;
+  margin: 0;
+  overflow-x: hidden;
+}
+
 body.dashboard-body {
   background:
     radial-gradient(circle at top, rgba(255, 255, 255, 0.82), transparent 30%),
@@ -280,8 +287,7 @@ body.light-dashboard-body .backdrop-blur-md {
   backdrop-filter: blur(12px);
 }
 
-a {
-  color: inherit;
+:where(a) {
   text-decoration: none;
 }
 
