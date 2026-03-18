@@ -113,6 +113,7 @@ Important backend variables:
 - `TRADING_BOT_EXCHANGE_MARKET_TYPE=spot`
 - `TRADING_BOT_STATE_DIR=.data/state`
 - `TRADING_BOT_LOG_DIR=.data/logs`
+- `TRADING_BOT_HISTORY_DIR=.data/binance/spot/monthly/klines`
 - `TRADING_BOT_MARKETDATA_WS_ENABLED=true`
 - `TRADING_BOT_MARKETDATA_WS_URL=wss://data-stream.binance.vision`
 - `TRADING_BOT_AI_PROVIDER=xai`
@@ -126,6 +127,8 @@ Important frontend variables:
 - `LINE_REDIRECT_URI` is optional; when omitted, the frontend derives it from the current origin
 
 If `AUTH_SESSION_SECRET` is unset, the app falls back to a built-in development secret. If the LINE variables are unset, the frontend falls back to demo authentication for local development.
+
+Backtesting reads Binance monthly archive zip files from `TRADING_BOT_HISTORY_DIR`. In the ONCE image, that defaults to `/storage/binance/spot/monthly/klines`, so archive data survives redeploys when mounted under `/storage`.
 
 ## Backend Commands
 

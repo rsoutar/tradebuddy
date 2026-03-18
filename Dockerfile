@@ -8,6 +8,7 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     TRADING_BOT_API_PORT=8000 \
     TRADING_BOT_STATE_DIR=/storage/state \
     TRADING_BOT_LOG_DIR=/storage/logs \
+    TRADING_BOT_HISTORY_DIR=/storage/binance/spot/monthly/klines \
     VITE_API_BASE_URL=http://127.0.0.1:8000
 
 RUN apt-get update \

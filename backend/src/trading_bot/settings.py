@@ -48,6 +48,7 @@ class RuntimeSettings:
     log_level: str
     state_dir: Path
     log_dir: Path
+    history_dir: Path
 
 
 @dataclass(frozen=True)
@@ -80,6 +81,9 @@ def load_settings() -> AppSettings:
         log_level=os.getenv("TRADING_BOT_LOG_LEVEL", "INFO").upper(),
         state_dir=Path(os.getenv("TRADING_BOT_STATE_DIR", ".data/state")),
         log_dir=Path(os.getenv("TRADING_BOT_LOG_DIR", ".data/logs")),
+        history_dir=Path(
+            os.getenv("TRADING_BOT_HISTORY_DIR", ".data/binance/spot/monthly/klines")
+        ),
     )
     if runtime.log_level not in {"DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"}:
         raise ValueError("TRADING_BOT_LOG_LEVEL must be a valid Python log level.")

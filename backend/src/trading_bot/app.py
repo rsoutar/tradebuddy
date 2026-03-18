@@ -60,7 +60,9 @@ class TradingBotApp:
         )
         self.paper_store = PaperTradingStore(settings.runtime.state_dir / "paper_trading.sqlite3")
         self.risk_manager = RiskManager()
-        self.historical_loader = historical_loader or BinanceHistoricalKlineLoader()
+        self.historical_loader = historical_loader or BinanceHistoricalKlineLoader(
+            data_dir=settings.runtime.history_dir
+        )
         self.grid_backtest_runner = GridBacktestRunner(self.historical_loader)
         self.rebalance_backtest_runner = RebalanceBacktestRunner(self.historical_loader)
         self.infinity_grid_backtest_runner = InfinityGridBacktestRunner(self.historical_loader)
