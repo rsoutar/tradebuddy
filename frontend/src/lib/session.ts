@@ -262,6 +262,7 @@ const lineScopes = ['openid', 'profile']
 function getSessionPassword() {
   return (
     process.env.AUTH_SESSION_SECRET ??
+    process.env.SECRET_KEY_BASE ??
     'oscar-dev-session-secret-change-me-1234567890'
   )
 }

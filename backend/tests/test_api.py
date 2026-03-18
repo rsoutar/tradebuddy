@@ -76,6 +76,13 @@ def test_dashboard_endpoint_returns_dashboard_payload(monkeypatch, tmp_path) -> 
         "infinity-grid",
     }
     assert payload["dashboard"]["events"] == []
+    assert payload["dashboard"]["profit24hUsd"] == 0.0
+    assert payload["dashboard"]["portfolioPerformance"] == [
+        {
+            "equityUsd": 0.0,
+            "timestamp": payload["dashboard"]["portfolioPerformance"][0]["timestamp"],
+        }
+    ]
 
 
 def test_swagger_endpoint_is_available(monkeypatch, tmp_path) -> None:
@@ -1263,3 +1270,66 @@ def test_deposit_endpoint_persists_balance_and_log(monkeypatch, tmp_path) -> Non
     assert dashboard_payload["dashboard"]["events"][0]["detail"].startswith(
         "Added $250.00 to the paper wallet."
     )
+
+
+def test_dashboard_profit_and_performance_ignore_deposits_and_dashboard_reads(monkeypatch, tmp_path) -> None:
+    app = build_app(monkeypatch, tmp_path)
+    snapshot_path = tmp_path / "state" / "market_snapshot.json"
+
+    app.deposit_paper_funds(5000, user_id="user-123", user_name="Test Trader")
+
+    write_shared_snapshot(
+        snapshot_path,
+        MarketSnapshot(
+            symbol="BTC/USDT",
+            price=100.0,
+            change_24h_pct=0.0,
+            volume_24h=0.0,
+            volatility_24h_pct=0.0,
+            trend="flat",
+        ),
+    )
+    app.create_bot(
+        StrategyType.REBALANCE,
+        budget_usd=1000,
+        user_id="user-123",
+        user_name="Test Trader",
+        rebalance_config={
+            "target_btc_ratio": 0.5,
+            "rebalance_threshold_pct": 5.0,
+            "interval_minutes": 60,
+        },
+    )
+    bot_id = app.paper_store.list_bot_instances(user_id="user-123")[0]["id"]
+
+    write_shared_snapshot(
+        snapshot_path,
+        MarketSnapshot(
+            symbol="BTC/USDT",
+            price=110.0,
+            change_24h_pct=10.0,
+            volume_24h=0.0,
+            volatility_24h_pct=0.0,
+            trend="up",
+        ),
+    )
+    app.process_bot_cycle(bot_id)
+
+    database_path = tmp_path / "state" / "paper_trading.sqlite3"
+    with sqlite3.connect(database_path) as connection:
+        snapshot_count_before_dashboard = connection.execute(
+            "SELECT COUNT(*) FROM portfolio_snapshots"
+        ).fetchone()[0]
+
+    payload = app.dashboard(user_id="user-123", user_name="Test Trader")
+
+    with sqlite3.connect(database_path) as connection:
+        snapshot_count_after_dashboard = connection.execute(
+            "SELECT COUNT(*) FROM portfolio_snapshots"
+        ).fetchone()[0]
+
+    assert snapshot_count_after_dashboard == snapshot_count_before_dashboard
+    assert payload["dashboard"]["capitalUsd"] == 5150.0
+    assert payload["dashboard"]["profit24hUsd"] == 50.0
+    assert payload["dashboard"]["profit24hPct"] == 0.98
+    assert payload["dashboard"]["portfolioPerformance"][-1]["equityUsd"] == 50.0
