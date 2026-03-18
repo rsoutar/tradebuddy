@@ -96,6 +96,10 @@ def create_api(trading_app: Optional[TradingBotApp] = None) -> FastAPI:
     def healthcheck() -> dict[str, bool]:
         return {"ok": True}
 
+    @api.get("/up", include_in_schema=False)
+    def upcheck() -> dict[str, bool]:
+        return {"ok": True}
+
     @api.get("/docs", include_in_schema=False)
     def swagger_redirect() -> RedirectResponse:
         return RedirectResponse(url="/swagger")

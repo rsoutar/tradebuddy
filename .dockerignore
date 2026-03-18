@@ -1,0 +1,16 @@
+.git
+.gitignore
+.DS_Store
+.env
+frontend/.env
+node_modules
+frontend/node_modules
+backend/.venv
+backend/.pytest_cache
+backend/.ruff_cache
+frontend/.tanstack
+frontend/.output
+backend/.data
+.data
+dist
+coverage

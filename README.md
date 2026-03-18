@@ -65,6 +65,40 @@ README.md   Repository overview and local setup
 
 4. Open the frontend in your browser and the API docs at [http://127.0.0.1:8000/swagger](http://127.0.0.1:8000/swagger).
 
+## Docker
+
+1. Copy the shared environment template and set a real `AUTH_SESSION_SECRET`:
+
+   ```bash
+   cp .env.example .env
+   ```
+
+2. Start the full stack:
+
+   ```bash
+   docker compose up --build
+   ```
+
+3. Open the frontend at [http://127.0.0.1:3000](http://127.0.0.1:3000) and the backend docs at [http://127.0.0.1:8000/swagger](http://127.0.0.1:8000/swagger).
+
+The compose setup keeps backend state and logs in a named Docker volume mounted at `/app/.data`. It also overrides `VITE_API_BASE_URL` inside the frontend container so the frontend talks to the backend service over the Docker network while still exposing the app on port `3000`.
+
+## ONCE
+
+The repository root [`Dockerfile`](Dockerfile) builds a single-container image for [ONCE](https://github.com/basecamp/once). It:
+
+- serves HTTP on port `80`
+- exposes `GET /up` for health checks
+- stores backend state and logs under `/storage`
+
+Build it locally with:
+
+```bash
+docker build -t ghcr.io/rsoutar/tradebuddy:latest .
+```
+
+Merges to `main` also trigger the GitHub Actions workflow in [`.github/workflows/publish-image.yml`](.github/workflows/publish-image.yml), which rebuilds this root image and publishes it to `ghcr.io/rsoutar/tradebuddy`.
+
 ## Environment
 
 The root [`.env.example`](.env.example) contains the shared defaults used by local development.
@@ -118,6 +152,7 @@ Those dependencies enable CCXT-backed exchange access for authenticated reads an
 
 Default local server: `http://127.0.0.1:8000`
 
+- `GET /up`
 - `GET /health`
 - `GET /swagger`
 - `GET /redoc`

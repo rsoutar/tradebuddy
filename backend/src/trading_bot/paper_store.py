@@ -1190,6 +1190,25 @@ class PaperTradingStore:
             for row in rows
         ]
 
+    def list_deposit_events(self, *, user_id: str) -> list[dict[str, Any]]:
+        with self._connect() as connection:
+            rows = connection.execute(
+                """
+                SELECT amount_usd, created_at
+                FROM paper_events
+                WHERE user_id = ? AND event_type = 'deposit' AND amount_usd IS NOT NULL
+                ORDER BY created_at ASC, id ASC
+                """,
+                (user_id,),
+            ).fetchall()
+        return [
+            {
+                "amountUsd": round(float(row["amount_usd"] or 0.0), 2),
+                "timestamp": row["created_at"],
+            }
+            for row in rows
+        ]
+
     def list_active_strategies(self, *, user_id: str, limit: int = 20) -> list[dict[str, Any]]:
         with self._connect() as connection:
             rows = connection.execute(

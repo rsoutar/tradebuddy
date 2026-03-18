@@ -411,21 +411,70 @@ class TradingBotApp:
         btc_balance = float(bot_state.get("btcBalance", 0.0))
         return round(usd_balance + (btc_balance * snapshot.price), 2)
 
-    def _portfolio_total_usd(
-        self,
-        account_state: dict[str, Any],
-        bot_rows: list[dict[str, Any]],
-        snapshot: MarketSnapshot,
-    ) -> float:
-        reserve_total = account_state["usd_balance"] + (account_state["btc_balance"] * snapshot.price)
-        bot_total = sum(self._bot_equity_usd(bot_row, snapshot) for bot_row in bot_rows)
-        return round(reserve_total + bot_total, 2)
-
     def _reserve_total_usd(self, account_state: dict[str, Any], snapshot: MarketSnapshot) -> float:
         return round(
             float(account_state["usd_balance"]) + (float(account_state["btc_balance"]) * snapshot.price),
             2,
         )
+
+    def _record_portfolio_snapshot(
+        self,
+        *,
+        user_id: str,
+        account_state: dict[str, Any],
+        active_strategies: list[dict[str, Any]],
+        snapshot: MarketSnapshot,
+        timestamp: Optional[str] = None,
+    ) -> float:
+        reserve_total = self._reserve_total_usd(account_state, snapshot)
+        active_bot_total = round(sum(bot["currentEquityUsd"] for bot in active_strategies), 2)
+        total_portfolio_usd = round(reserve_total + active_bot_total, 2)
+        self.paper_store.record_portfolio_snapshot(
+            user_id=user_id,
+            total_equity_usd=total_portfolio_usd,
+            timestamp=timestamp or self._timestamp(),
+        )
+        return total_portfolio_usd
+
+    def _portfolio_performance_points(
+        self,
+        portfolio_snapshots: list[dict[str, Any]],
+        deposit_events: list[dict[str, Any]],
+    ) -> list[dict[str, Any]]:
+        if not portfolio_snapshots:
+            return []
+
+        cumulative_deposits_usd = 0.0
+        deposit_index = 0
+        ordered_deposits = sorted(
+            deposit_events,
+            key=lambda item: (item["timestamp"], item["amountUsd"]),
+        )
+        initial_contribution_usd = float(portfolio_snapshots[0]["equityUsd"])
+        performance_points: list[dict[str, Any]] = []
+
+        for index, point in enumerate(portfolio_snapshots):
+            point_time = datetime.fromisoformat(point["timestamp"])
+            while deposit_index < len(ordered_deposits):
+                deposit = ordered_deposits[deposit_index]
+                deposit_time = datetime.fromisoformat(deposit["timestamp"])
+                if deposit_time > point_time:
+                    break
+                if index == 0 and deposit_time == point_time:
+                    break
+                cumulative_deposits_usd = round(cumulative_deposits_usd + float(deposit["amountUsd"]), 2)
+                deposit_index += 1
+
+            net_contributions_usd = round(initial_contribution_usd + cumulative_deposits_usd, 2)
+            performance_points.append(
+                {
+                    "timestamp": point["timestamp"],
+                    "equityUsd": round(float(point["equityUsd"]) - net_contributions_usd, 2),
+                    "totalEquityUsd": round(float(point["equityUsd"]), 2),
+                }
+            )
+
+        return performance_points
 
     def _reserve_after_funding_bot(
         self,
@@ -547,6 +596,22 @@ class TradingBotApp:
             )
         refreshed_bot = self.paper_store.get_bot_instance(bot_id=bot_id)
         refreshed_balances = self._bot_balances(refreshed_bot) if refreshed_bot is not None else []
+        if refreshed_bot is not None:
+            refreshed_account_state = self.paper_store.ensure_account(
+                user_id=refreshed_bot["userId"],
+                user_name=refreshed_bot["userName"],
+                timestamp=self._timestamp(),
+            )
+            refreshed_active_strategies = [
+                self._active_strategy_summary(active_bot, snapshot)
+                for active_bot in self.paper_store.list_active_strategies(user_id=refreshed_bot["userId"])
+            ]
+            self._record_portfolio_snapshot(
+                user_id=refreshed_bot["userId"],
+                account_state=refreshed_account_state,
+                active_strategies=refreshed_active_strategies,
+                snapshot=snapshot,
+            )
         return {
             "snapshot": snapshot,
             "balances": refreshed_balances or balances,
@@ -727,20 +792,17 @@ class TradingBotApp:
             for strategy_type in StrategyType
         ]
         persisted_events = self.paper_store.list_events(user_id=user_id)
-        bot_rows = self.paper_store.list_bot_instances(user_id=user_id)
-        active_bot_rows = [bot for bot in bot_rows if bot["status"] == "paper-running"]
+        deposit_events = self.paper_store.list_deposit_events(user_id=user_id)
         active_strategies = [
             self._active_strategy_summary(bot, snapshot)
             for bot in self.paper_store.list_active_strategies(user_id=user_id)
         ]
-        total_portfolio_usd = self._portfolio_total_usd(account_state, active_bot_rows, snapshot)
         available_reserve_usd = self._reserve_total_usd(account_state, snapshot)
-        allocated_capital_usd = round(sum(bot.get("budgetUsd", 0.0) for bot in active_bot_rows), 2)
-        self.paper_store.record_portfolio_snapshot(
-            user_id=user_id,
-            total_equity_usd=total_portfolio_usd,
-            timestamp=self._timestamp(),
+        total_portfolio_usd = round(
+            available_reserve_usd + sum(bot["currentEquityUsd"] for bot in active_strategies),
+            2,
         )
+        allocated_capital_usd = round(sum(bot.get("budgetUsd", 0.0) for bot in active_strategies), 2)
         portfolio_snapshots = self.paper_store.list_portfolio_snapshots(user_id=user_id, limit=96)
         if not portfolio_snapshots:
             portfolio_snapshots = [
@@ -749,18 +811,25 @@ class TradingBotApp:
                     "timestamp": self._timestamp(),
                 }
             ]
-        current_snapshot = portfolio_snapshots[-1]
+        performance_points = self._portfolio_performance_points(portfolio_snapshots, deposit_events)
+        current_snapshot = performance_points[-1]
         prior_cutoff = self._utcnow() - timedelta(hours=24)
         prior_portfolio_snapshot = next(
             (
                 item
-                for item in reversed(portfolio_snapshots)
+                for item in reversed(performance_points)
                 if datetime.fromisoformat(item["timestamp"]) <= prior_cutoff
             ),
-            portfolio_snapshots[0],
+            None,
         )
+        if prior_portfolio_snapshot is None:
+            prior_portfolio_snapshot = performance_points[0]
         profit_24h_usd = round(current_snapshot["equityUsd"] - prior_portfolio_snapshot["equityUsd"], 2)
-        baseline_equity = prior_portfolio_snapshot["equityUsd"]
+        baseline_equity = (
+            prior_portfolio_snapshot["totalEquityUsd"]
+            if datetime.fromisoformat(prior_portfolio_snapshot["timestamp"]) <= prior_cutoff
+            else round(total_portfolio_usd - current_snapshot["equityUsd"], 2)
+        )
         profit_24h_pct = round((profit_24h_usd / baseline_equity) * 100, 2) if baseline_equity > 0 else 0.0
 
         total_notional = sum(item["notional"] for item in evaluations)
@@ -803,7 +872,13 @@ class TradingBotApp:
                 "allocatedCapitalUsd": allocated_capital_usd,
                 "profit24hUsd": profit_24h_usd,
                 "profit24hPct": profit_24h_pct,
-                "portfolioPerformance": portfolio_snapshots,
+                "portfolioPerformance": [
+                    {
+                        "equityUsd": point["equityUsd"],
+                        "timestamp": point["timestamp"],
+                    }
+                    for point in performance_points
+                ],
                 "activeStrategy": account_state["active_strategy"],
                 "botStatus": account_state["bot_status"],
                 "paperRunCount": account_state["paper_run_count"],
@@ -1031,11 +1106,24 @@ class TradingBotApp:
         user_id: str = "demo-user",
         user_name: str = "Demo Trader",
     ) -> dict[str, Any]:
-        self.paper_store.record_deposit(
+        timestamp = self._timestamp()
+        account_state = self.paper_store.record_deposit(
             user_id=user_id,
             user_name=user_name,
             amount_usd=round(amount_usd, 2),
-            timestamp=self._timestamp(),
+            timestamp=timestamp,
+        )
+        snapshot = self.market_data.get_snapshot(self.settings.runtime.symbol)
+        active_strategies = [
+            self._active_strategy_summary(bot, snapshot)
+            for bot in self.paper_store.list_active_strategies(user_id=user_id)
+        ]
+        self._record_portfolio_snapshot(
+            user_id=user_id,
+            account_state=account_state,
+            active_strategies=active_strategies,
+            snapshot=snapshot,
+            timestamp=timestamp,
         )
         return self.dashboard(user_id=user_id, user_name=user_name)
 
