@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import uuid
+from contextlib import asynccontextmanager
 from dataclasses import asdict
 from datetime import datetime, timezone
 from typing import Optional
@@ -85,6 +86,12 @@ class BotControlRequest(UserScopedRequest):
 
 def create_api(trading_app: Optional[TradingBotApp] = None) -> FastAPI:
     app_state = trading_app or create_app()
+
+    @asynccontextmanager
+    async def lifespan(_: FastAPI):
+        app_state.recover_running_bots()
+        yield
+
     api = FastAPI(
         title="Oscar Trading Bot API",
         version="0.1.0",
@@ -92,6 +99,7 @@ def create_api(trading_app: Optional[TradingBotApp] = None) -> FastAPI:
         docs_url="/swagger",
         redoc_url="/redoc",
         openapi_url="/openapi.json",
+        lifespan=lifespan,
     )
 
     api.add_middleware(

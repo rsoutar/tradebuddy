@@ -1508,6 +1508,21 @@ class PaperTradingStore:
             "lastTradeAt": row["last_trade_at"],
         }
 
+    def list_recoverable_bot_ids(self, *, limit: int = 100) -> list[str]:
+        with self._connect() as connection:
+            rows = connection.execute(
+                """
+                SELECT id
+                FROM bot_instances
+                WHERE status = 'paper-running'
+                  AND desired_status = 'running'
+                ORDER BY started_at ASC, id ASC
+                LIMIT ?
+                """,
+                (limit,),
+            ).fetchall()
+        return [f"bot-{row['id']}" for row in rows]
+
     def mark_bot_process_started(self, *, bot_id: str, pid: int, timestamp: str) -> None:
         numeric_id = int(bot_id.replace("bot-", "", 1))
         with self._connect() as connection:

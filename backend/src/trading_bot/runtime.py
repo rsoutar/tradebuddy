@@ -6,6 +6,7 @@ import signal
 import subprocess
 import sys
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Optional
 
 from trading_bot.paper_store import PaperTradingStore
@@ -28,6 +29,31 @@ def is_process_alive(pid: Optional[int]) -> bool:
     return True
 
 
+def read_process_cmdline(pid: int) -> str:
+    if pid <= 0:
+        return ""
+    try:
+        raw = Path(f"/proc/{pid}/cmdline").read_bytes()
+    except OSError:
+        return ""
+    if not raw:
+        return ""
+    return raw.replace(b"\x00", b" ").decode(errors="ignore").strip()
+
+
+def is_bot_process_alive(pid: Optional[int], bot_id: str) -> bool:
+    if not is_process_alive(pid):
+        return False
+    cmdline = read_process_cmdline(int(pid))
+    if not cmdline:
+        return False
+    return (
+        ("trading_bot.cli" in cmdline or "trading-bot" in cmdline)
+        and "run-bot" in cmdline
+        and bot_id in cmdline
+    )
+
+
 class BotProcessManager:
     def __init__(self, settings: AppSettings, paper_store: PaperTradingStore, enabled: bool = True) -> None:
         self._settings = settings
@@ -39,7 +65,7 @@ class BotProcessManager:
         if bot is None:
             raise ValueError(f"Unknown bot id: {bot_id}")
 
-        if bot["pid"] and is_process_alive(bot["pid"]):
+        if bot["pid"] and is_bot_process_alive(bot["pid"], bot_id):
             return int(bot["pid"])
 
         if not self._enabled:
@@ -64,7 +90,7 @@ class BotProcessManager:
         if bot is None:
             return
         pid = bot["pid"]
-        if not pid or not is_process_alive(pid):
+        if not pid or not is_bot_process_alive(pid, bot_id):
             self._paper_store.mark_bot_stopped(bot_id=bot_id, timestamp=timestamp)
 
     def force_stop(self, bot_id: str) -> None:
@@ -74,7 +100,7 @@ class BotProcessManager:
 
         pid = bot["pid"]
         self.request_stop(bot_id)
-        if pid and is_process_alive(pid):
+        if pid and is_bot_process_alive(pid, bot_id):
             os.kill(pid, signal.SIGTERM)
 
     def reconcile_bot(self, bot_id: str) -> None:
@@ -83,7 +109,7 @@ class BotProcessManager:
             return
 
         pid = bot["pid"]
-        if bot["status"] == "paper-running" and pid and not is_process_alive(pid):
+        if bot["status"] == "paper-running" and pid and not is_bot_process_alive(pid, bot_id):
             if bot["desiredStatus"] == "stopped":
                 self._paper_store.mark_bot_stopped(bot_id=bot_id, timestamp=utc_timestamp())
             else:
@@ -93,3 +119,17 @@ class BotProcessManager:
                     error="Bot worker process exited unexpectedly.",
                     timestamp=utc_timestamp(),
                 )
+
+    def recover_running_bots(self) -> list[str]:
+        if not self._enabled:
+            return []
+
+        recovered_bot_ids: list[str] = []
+        for bot_id in self._paper_store.list_recoverable_bot_ids():
+            pid = self.start_bot(bot_id)
+            if pid is not None:
+                recovered_bot_ids.append(bot_id)
+
+        if recovered_bot_ids:
+            logger.info("Recovered %s running bot(s) after startup.", len(recovered_bot_ids))
+        return recovered_bot_ids
