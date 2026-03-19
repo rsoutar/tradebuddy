@@ -15,6 +15,7 @@ from trading_bot.models import (
     OrderIntent,
     RebalanceBotConfig,
     StrategyType,
+    SupportResistanceResult,
 )
 from trading_bot.paper_store import PaperTradingStore
 from trading_bot.runtime import BotProcessManager
@@ -32,6 +33,7 @@ from trading_bot.services.market_data import (
     read_shared_price_window,
 )
 from trading_bot.services.risk import RiskManager
+from trading_bot.services.support_resistance import SupportResistanceDetector
 from trading_bot.settings import AppSettings, load_settings
 from trading_bot.strategies.grid import GridStrategy
 from trading_bot.strategies.infinity_grid import InfinityGridStrategy
@@ -63,6 +65,7 @@ class TradingBotApp:
         self.historical_loader = historical_loader or BinanceHistoricalKlineLoader(
             data_dir=settings.runtime.history_dir
         )
+        self.sr_detector = SupportResistanceDetector(self.historical_loader)
         self.grid_backtest_runner = GridBacktestRunner(self.historical_loader)
         self.rebalance_backtest_runner = RebalanceBacktestRunner(self.historical_loader)
         self.infinity_grid_backtest_runner = InfinityGridBacktestRunner(self.historical_loader)
@@ -155,13 +158,24 @@ class TradingBotApp:
         strategy_type: StrategyType,
         snapshot: MarketSnapshot,
         config_override: Optional[Any] = None,
+        sr: Optional[SupportResistanceResult] = None,
     ) -> Union[GridBotConfig, RebalanceBotConfig, InfinityGridBotConfig]:
         if strategy_type is StrategyType.GRID:
             if isinstance(config_override, GridBotConfig):
                 return config_override
+            lower = snapshot.price * 0.92
+            upper = snapshot.price * 1.08
+            if sr:
+                if sr.nearest_support and sr.nearest_support.center_price < snapshot.price:
+                    lower = sr.nearest_support.center_price
+                if sr.nearest_resistance and sr.nearest_resistance.center_price > snapshot.price:
+                    upper = sr.nearest_resistance.center_price
+                if upper <= lower:
+                    lower = snapshot.price * 0.92
+                    upper = snapshot.price * 1.08
             return GridBotConfig(
-                lower_price=snapshot.price * 0.92,
-                upper_price=snapshot.price * 1.08,
+                lower_price=lower,
+                upper_price=upper,
                 grid_count=8,
                 spacing_pct=2.0,
                 stop_loss_enabled=False,
@@ -178,8 +192,11 @@ class TradingBotApp:
 
         if isinstance(config_override, InfinityGridBotConfig):
             return config_override
+        reference = snapshot.price
+        if sr and sr.nearest_support and sr.nearest_support.center_price < snapshot.price:
+            reference = sr.nearest_support.center_price
         return InfinityGridBotConfig(
-            reference_price=snapshot.price,
+            reference_price=reference,
             spacing_pct=1.5,
             order_size_usd=100.0,
             levels_per_side=6,
@@ -254,6 +271,225 @@ class TradingBotApp:
         required_budget = config.order_size_usd * config.levels_per_side * 2
         return round(required_budget, 2), None
 
+    def _recommend_strategy(
+        self,
+        snapshot: MarketSnapshot,
+        sr: Optional[SupportResistanceResult] = None,
+    ) -> tuple[StrategyType, str]:
+        trend = (snapshot.trend or "").lower()
+        volatility = snapshot.volatility_24h_pct
+        sup = sr.nearest_support if sr else None
+        res = sr.nearest_resistance if sr else None
+        pos = sr.price_position if sr else "mid_range"
+
+        if pos == "near_support" and sup:
+            if trend in ("uptrend", "strong_uptrend", "bullish"):
+                return StrategyType.INFINITY_GRID, (
+                    f"Price sitting on ${sup.center_price:,.0f} support "
+                    f"({sup.touches} touches) with bullish trend — "
+                    "infinity grid accumulates here and rides the momentum"
+                )
+            return StrategyType.GRID, (
+                f"Price sitting on ${sup.center_price:,.0f} support "
+                f"({sup.touches} touches) — grid ladder buys into the zone"
+            )
+
+        if pos == "near_resistance" and res:
+            if trend in ("downtrend", "bearish"):
+                return StrategyType.REBALANCE, (
+                    f"Price at ${res.center_price:,.0f} resistance "
+                    f"({res.touches} touches) with bearish trend — "
+                    "rebalance reduces exposure near the ceiling"
+                )
+            return StrategyType.GRID, (
+                f"Price at ${res.center_price:,.0f} resistance "
+                f"({res.touches} touches) — grid ladder sells into the zone"
+            )
+
+        if pos == "above_resistance" and res:
+            if trend in ("uptrend", "strong_uptrend", "bullish"):
+                return StrategyType.INFINITY_GRID, (
+                    f"Price broke above ${res.center_price:,.0f} resistance "
+                    "with bullish trend — infinity grid rides the breakout"
+                )
+
+        if pos == "below_support" and sup:
+            if volatility > 5:
+                return StrategyType.GRID, (
+                    f"Price fell below ${sup.center_price:,.0f} support "
+                    "with high volatility — grid catches the bounce"
+                )
+            return StrategyType.REBALANCE, (
+                f"Price below ${sup.center_price:,.0f} support — "
+                "rebalance stays defensive until a floor forms"
+            )
+
+        if pos == "mid_range" and sup and res:
+            range_pct = (res.center_price - sup.center_price) / snapshot.price * 100
+            if range_pct > 10 and volatility > 4:
+                return StrategyType.GRID, (
+                    f"Price between ${sup.center_price:,.0f} support and "
+                    f"${res.center_price:,.0f} resistance ({range_pct:.0f}% range) — "
+                    "grid ladder trades the corridor"
+                )
+            if range_pct < 5:
+                return StrategyType.REBALANCE, (
+                    "Tight range between support and resistance — "
+                    "rebalance keeps allocation steady with low overhead"
+                )
+
+        # Fallback to trend/volatility heuristics
+        if trend in ("uptrend", "strong_uptrend", "bullish"):
+            return StrategyType.INFINITY_GRID, "Trending up — infinity grid rides the momentum and extends entries"
+        if trend in ("downtrend", "bearish"):
+            if volatility > 5:
+                return StrategyType.GRID, "Sideways market with elevated volatility — grid ladder catches the chop"
+            return StrategyType.REBALANCE, "Steady conditions — rebalance keeps exposure on target with low overhead"
+        if volatility > 4:
+            return StrategyType.GRID, "Sideways market with elevated volatility — grid ladder catches the chop"
+        return StrategyType.REBALANCE, "Steady conditions — rebalance keeps exposure on target with low overhead"
+
+    def compare_strategies(self) -> dict[str, Any]:
+        symbol = self.settings.runtime.symbol
+        snapshot = self.market_data.get_snapshot(symbol)
+        balances = self.exchange_client.fetch_balances()
+
+        sr: Optional[SupportResistanceResult] = None
+        try:
+            sr = self.sr_detector.detect(snapshot.price)
+        except Exception:
+            import logging
+
+            logging.getLogger(__name__).exception("[compare_strategies] S/R detection failed")
+
+        recommended, reason = self._recommend_strategy(snapshot, sr)
+
+        sr_data = None
+        if sr:
+            sr_data = {
+                "zones": [
+                    {
+                        "lower_price": z.lower_price,
+                        "upper_price": z.upper_price,
+                        "center_price": z.center_price,
+                        "touches": z.touches,
+                        "strength": z.strength,
+                        "zone_type": z.zone_type,
+                    }
+                    for z in sr.zones
+                ],
+                "nearest_support": (
+                    {
+                        "lower_price": sr.nearest_support.lower_price,
+                        "upper_price": sr.nearest_support.upper_price,
+                        "center_price": sr.nearest_support.center_price,
+                        "touches": sr.nearest_support.touches,
+                        "strength": sr.nearest_support.strength,
+                        "zone_type": sr.nearest_support.zone_type,
+                    }
+                    if sr.nearest_support
+                    else None
+                ),
+                "nearest_resistance": (
+                    {
+                        "lower_price": sr.nearest_resistance.lower_price,
+                        "upper_price": sr.nearest_resistance.upper_price,
+                        "center_price": sr.nearest_resistance.center_price,
+                        "touches": sr.nearest_resistance.touches,
+                        "strength": sr.nearest_resistance.strength,
+                        "zone_type": sr.nearest_resistance.zone_type,
+                    }
+                    if sr.nearest_resistance
+                    else None
+                ),
+                "price_position": sr.price_position,
+                "current_price": sr.current_price,
+            }
+
+        strategies = []
+        for strategy_type in StrategyType:
+            config = self._resolve_strategy_config(strategy_type, snapshot, sr=sr)
+            evaluation_data = self._evaluate_strategy(strategy_type, snapshot, balances, config_override=config)
+            evaluation = evaluation_data["evaluation"]
+            risk = evaluation_data["risk"]
+            notional = evaluation_data["notional"]
+            budget = self._minimum_budget_required(strategy_type, snapshot, config)
+
+            strategies.append(
+                {
+                    "strategy": strategy_type.value,
+                    "mode": self._strategy_mode(strategy_type),
+                    "config_summary": str(config),
+                    "order_count": len(evaluation.orders),
+                    "summary": evaluation.summary,
+                    "risk_warnings": risk.warnings,
+                    "strategy_warnings": evaluation.warnings,
+                    "notional_usd": round(notional, 2),
+                    "min_budget_usd": budget[0],
+                    "budget_note": budget[1],
+                    "recommended": strategy_type is recommended,
+                }
+            )
+
+        return {
+            "market": {
+                "symbol": snapshot.symbol,
+                "price": snapshot.price,
+                "change_24h_pct": snapshot.change_24h_pct,
+                "volume_24h": snapshot.volume_24h,
+                "volatility_24h_pct": snapshot.volatility_24h_pct,
+                "trend": snapshot.trend,
+            },
+            "support_resistance": sr_data,
+            "recommendation": recommended.value,
+            "reason": reason,
+            "strategies": strategies,
+        }
+
+    def detect_support_resistance(self) -> dict[str, Any]:
+        symbol = self.settings.runtime.symbol
+        snapshot = self.market_data.get_snapshot(symbol)
+        sr = self.sr_detector.detect(snapshot.price)
+        return {
+            "zones": [
+                {
+                    "lower_price": z.lower_price,
+                    "upper_price": z.upper_price,
+                    "center_price": z.center_price,
+                    "touches": z.touches,
+                    "strength": z.strength,
+                    "zone_type": z.zone_type,
+                }
+                for z in sr.zones
+            ],
+            "nearest_support": (
+                {
+                    "lower_price": sr.nearest_support.lower_price,
+                    "upper_price": sr.nearest_support.upper_price,
+                    "center_price": sr.nearest_support.center_price,
+                    "touches": sr.nearest_support.touches,
+                    "strength": sr.nearest_support.strength,
+                    "zone_type": sr.nearest_support.zone_type,
+                }
+                if sr.nearest_support
+                else None
+            ),
+            "nearest_resistance": (
+                {
+                    "lower_price": sr.nearest_resistance.lower_price,
+                    "upper_price": sr.nearest_resistance.upper_price,
+                    "center_price": sr.nearest_resistance.center_price,
+                    "touches": sr.nearest_resistance.touches,
+                    "strength": sr.nearest_resistance.strength,
+                    "zone_type": sr.nearest_resistance.zone_type,
+                }
+                if sr.nearest_resistance
+                else None
+            ),
+            "price_position": sr.price_position,
+            "current_price": sr.current_price,
+        }
+
     def _config_summary(
         self,
         strategy_type: StrategyType,
@@ -299,6 +535,7 @@ class TradingBotApp:
         *,
         budget_usd: float,
         snapshot: MarketSnapshot,
+        sr: Optional[SupportResistanceResult] = None,
     ) -> tuple[
         Union[GridBotConfig, RebalanceBotConfig, InfinityGridBotConfig],
         str,
@@ -312,6 +549,8 @@ class TradingBotApp:
         trend = snapshot.trend.lower()
         is_bullish = "bull" in trend or "up" in trend
         is_bearish = "bear" in trend or "down" in trend
+        sup = sr.nearest_support if sr else None
+        res = sr.nearest_resistance if sr else None
 
         if strategy_type is StrategyType.GRID:
             downside_width_pct = clamp(volatility * (1.9 if is_bearish else 1.55), 4.5, 16.0)
@@ -321,9 +560,27 @@ class TradingBotApp:
             stop_loss_enabled = volatility >= 6.0 or is_bearish
             stop_loss_pct = round(clamp(downside_width_pct + 2.5, 6.0, 18.0), 1)
 
+            lower_price = round(snapshot.price * (1 - downside_width_pct / 100), 2)
+            upper_price = round(snapshot.price * (1 + upside_width_pct / 100), 2)
+
+            sr_lower = None
+            sr_upper = None
+            if sup and sup.center_price < snapshot.price:
+                sr_lower = sup.center_price
+            if res and res.center_price > snapshot.price:
+                sr_upper = res.center_price
+
+            if sr_lower and sr_upper and sr_lower < sr_upper:
+                lower_price = sr_lower
+                upper_price = sr_upper
+            elif sr_lower and sr_lower < snapshot.price * 0.98:
+                lower_price = sr_lower
+            elif sr_upper and sr_upper > snapshot.price * 1.02:
+                upper_price = sr_upper
+
             config = GridBotConfig(
-                lower_price=round(snapshot.price * (1 - downside_width_pct / 100), 2),
-                upper_price=round(snapshot.price * (1 + upside_width_pct / 100), 2),
+                lower_price=lower_price,
+                upper_price=upper_price,
                 grid_count=grid_count,
                 spacing_pct=spacing_pct,
                 stop_loss_enabled=stop_loss_enabled,
@@ -349,6 +606,13 @@ class TradingBotApp:
                 f"24h volatility, so the launch range now stretches from ${config.lower_price:,.0f} "
                 f"to ${config.upper_price:,.0f} with {config.grid_count} levels and {config.spacing_pct:.1f}% spacing."
             )
+            if sr_lower and sr_upper and sr_lower < sr_upper and sup and res:
+                rationale += (
+                    f" Range snapped to the ${sr_lower:,.0f}"
+                    f" ({sup.touches} touches)"
+                    f" / ${sr_upper:,.0f}"
+                    f" ({res.touches} touches) S/R zones."
+                )
             highlights = [
                 f"{buy_levels} buy levels sit below the current ${snapshot.price:,.0f} spot for immediate deployment.",
                 f"Budget target: ${budget_usd:,.0f} against an estimated minimum of ${required_budget_usd:,.0f}.",
@@ -384,6 +648,10 @@ class TradingBotApp:
                 f"the setup keeps {target_btc_ratio * 100:.0f}% of the budget in BTC, waits for "
                 f"{rebalance_threshold_pct:.1f}% drift, and reviews exposure every {interval_minutes} minutes."
             )
+            if sr and sr.price_position in ("near_support", "below_support") and sup:
+                rationale += f" Price is near ${sup.center_price:,.0f} support ({sup.touches} touches), keeping allocation steady."
+            elif sr and sr.price_position in ("near_resistance", "above_resistance") and res:
+                rationale += f" Price is near ${res.center_price:,.0f} resistance ({res.touches} touches), so the ratio leans defensive."
             highlights = [
                 f"Budget target: ${budget_usd:,.0f} against an estimated minimum of ${required_budget_usd:,.0f}.",
                 f"Spot change is {snapshot.change_24h_pct:+.1f}% over 24h, so the ratio leans {'slightly long' if target_btc_ratio >= 0.5 else 'slightly defensive'}.",
@@ -400,8 +668,13 @@ class TradingBotApp:
             levels_per_side = 4
         spacing_pct = round(clamp(volatility * 0.45, 0.9, 2.6), 1)
         order_size_usd = round(max(MIN_EFFECTIVE_ORDER_USD, budget_usd * 0.42 / levels_per_side), 2)
+
+        reference_price = snapshot.price
+        if sup and sup.center_price < snapshot.price:
+            reference_price = sup.center_price
+
         config = InfinityGridBotConfig(
-            reference_price=round(snapshot.price, 2),
+            reference_price=round(reference_price, 2),
             spacing_pct=spacing_pct,
             order_size_usd=order_size_usd,
             levels_per_side=levels_per_side,
@@ -422,6 +695,8 @@ class TradingBotApp:
             f"${config.reference_price:,.0f} with {config.levels_per_side} levels per side, "
             f"{config.spacing_pct:.1f}% spacing, and ${config.order_size_usd:,.0f} clips."
         )
+        if sup and sup.center_price < snapshot.price:
+            rationale += f" Reference anchored to the ${sup.center_price:,.0f} support zone ({sup.touches} touches)."
         highlights = [
             f"Budget target: ${budget_usd:,.0f} against an estimated minimum of ${required_budget_usd:,.0f}.",
             f"The ladder is split evenly around spot so it can keep re-arming both sides after fills.",
@@ -1500,10 +1775,20 @@ class TradingBotApp:
             timestamp=timestamp,
         )
         normalized_budget_usd = round(budget_usd, 2)
+
+        sr: Optional[SupportResistanceResult] = None
+        try:
+            sr = self.sr_detector.detect(snapshot.price)
+        except Exception:
+            import logging
+
+            logging.getLogger(__name__).exception("[build_managed_bot_setup] S/R detection failed")
+
         config, headline, rationale, highlights = self._build_managed_bot_setup(
             strategy_type,
             budget_usd=normalized_budget_usd,
             snapshot=snapshot,
+            sr=sr,
         )
         config_payload = asdict(config)
         required_budget_usd, blocking_reason = self._minimum_budget_required(

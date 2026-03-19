@@ -13,9 +13,10 @@ import type {
   DashboardState,
   MarketConnectionState,
   MarketState,
+  StrategyComparisonResult,
   StrategyKey,
 } from '../lib/session'
-import { createBot, depositPaperFunds, getAiBotDraft, getDashboard, stopBot } from '../lib/session'
+import { createBot, depositPaperFunds, getAiBotDraft, getDashboard, getStrategyComparison, stopBot } from '../lib/session'
 import { useTheme } from '../lib/theme'
 
 const strategyLabels: Record<StrategyKey, string> = {
@@ -837,6 +838,8 @@ function DashboardPage() {
   const [depositAmount, setDepositAmount] = useState('')
   const [depositError, setDepositError] = useState<string>()
   const [isDepositing, setIsDepositing] = useState(false)
+  const [strategyComparison, setStrategyComparison] = useState<StrategyComparisonResult>()
+  const [isComparingStrategies, setIsComparingStrategies] = useState(false)
   const [actionError, setActionError] = useState<string>()
   const [searchValue, setSearchValue] = useState('')
   const [selectedActiveBotId, setSelectedActiveBotId] = useState<string>()
@@ -1132,6 +1135,37 @@ function DashboardPage() {
     isCreatingBot
     || isCreateBudgetBlocked
     || (isAiPilotEnabled && (isAiDraftLoading || !aiDraft))
+
+  useEffect(() => {
+    if (!isCreateBotModalOpen) {
+      return
+    }
+
+    let cancelled = false
+    setIsComparingStrategies(true)
+
+    getStrategyComparison()
+      .then((result) => {
+        if (!cancelled) {
+          setStrategyComparison(result)
+          setSelectedBotType(result.recommendation)
+        }
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setStrategyComparison(undefined)
+        }
+      })
+      .finally(() => {
+        if (!cancelled) {
+          setIsComparingStrategies(false)
+        }
+      })
+
+    return () => {
+      cancelled = true
+    }
+  }, [isCreateBotModalOpen])
 
   useEffect(() => {
     if (!isCreateBotModalOpen || !isAiPilotEnabled) {
@@ -1810,6 +1844,20 @@ function DashboardPage() {
                 <div className="grid gap-4">
                   {botCatalog.map((bot) => {
                     const isSelected = bot.key === selectedBotType
+                    const comparisonItem = strategyComparison?.strategies.find(
+                      (s) => s.strategy === bot.key,
+                    )
+                    const isRecommended = comparisonItem?.recommended ?? false
+                    const eyebrowText = isRecommended
+                      ? 'Recommended'
+                      : comparisonItem
+                        ? `Best for ${comparisonItem.mode.toLowerCase()} markets`
+                        : bot.eyebrow
+                    const suitabilityNote = isRecommended && strategyComparison
+                      ? strategyComparison.reason
+                      : comparisonItem
+                        ? comparisonItem.summary
+                        : bot.description
                     return (
                       <button
                         className={cx(
@@ -1835,10 +1883,14 @@ function DashboardPage() {
                             <p
                               className={cx(
                                 'text-[11px] font-semibold uppercase tracking-[0.28em]',
-                                isSelected ? selectedCreateTone.accentText : 'text-zinc-500 group-hover:text-zinc-400',
+                                isRecommended
+                                  ? 'text-amber-300'
+                                  : isSelected
+                                    ? selectedCreateTone.accentText
+                                    : 'text-zinc-500 group-hover:text-zinc-400',
                               )}
                             >
-                              {bot.eyebrow}
+                              {isRecommended ? '★ ' : ''}{eyebrowText}
                             </p>
                             <h3 className="mt-2 text-xl font-medium text-zinc-100 sm:text-[1.35rem]">
                               {strategyLabels[bot.key]}
@@ -1856,8 +1908,11 @@ function DashboardPage() {
                           </div>
                         </div>
                         <p className="relative mt-3 text-sm leading-6 text-zinc-400 group-hover:text-zinc-300">
-                          {bot.description}
+                          {suitabilityNote}
                         </p>
+                        {isComparingStrategies && !strategyComparison ? (
+                          <div className="mt-3 h-4 w-3/4 animate-pulse rounded bg-zinc-800/60" />
+                        ) : null}
                       </button>
                     )
                   })}
@@ -1885,6 +1940,48 @@ function DashboardPage() {
                       24h volatility {market.volatility_24h_pct.toFixed(1)}%
                     </p>
                   </div>
+                  {strategyComparison?.support_resistance ? (
+                    <div className="sm:col-span-2 rounded-[1.35rem] border border-zinc-800/80 bg-zinc-900/45 px-5 py-5">
+                      <p className="text-xs uppercase tracking-[0.22em] text-zinc-500">Key levels</p>
+                      <div className="mt-3 flex items-center gap-4">
+                        {strategyComparison.support_resistance.nearest_resistance ? (
+                          <div>
+                            <p className="text-xs text-zinc-500">Resistance</p>
+                            <p className="text-sm font-medium text-rose-300">
+                              {formatCurrency(strategyComparison.support_resistance.nearest_resistance.center_price)}
+                            </p>
+                            <p className="text-[11px] text-zinc-500">
+                              {strategyComparison.support_resistance.nearest_resistance.touches} touches
+                            </p>
+                          </div>
+                        ) : null}
+                        <div className="h-8 w-px bg-zinc-800" />
+                        {strategyComparison.support_resistance.nearest_support ? (
+                          <div>
+                            <p className="text-xs text-zinc-500">Support</p>
+                            <p className="text-sm font-medium text-emerald-300">
+                              {formatCurrency(strategyComparison.support_resistance.nearest_support.center_price)}
+                            </p>
+                            <p className="text-[11px] text-zinc-500">
+                              {strategyComparison.support_resistance.nearest_support.touches} touches
+                            </p>
+                          </div>
+                        ) : null}
+                        <div className="h-8 w-px bg-zinc-800" />
+                        <div>
+                          <p className="text-xs text-zinc-500">Position</p>
+                          <p className="text-sm font-medium capitalize text-zinc-100">
+                            {strategyComparison.support_resistance.price_position.replace(/_/g, ' ')}
+                          </p>
+                        </div>
+                      </div>
+                    </div>
+                  ) : isComparingStrategies ? (
+                    <div className="sm:col-span-2 rounded-[1.35rem] border border-zinc-800/80 bg-zinc-900/45 px-5 py-5">
+                      <div className="h-4 w-24 animate-pulse rounded bg-zinc-800/60" />
+                      <div className="mt-3 h-6 w-full animate-pulse rounded bg-zinc-800/40" />
+                    </div>
+                  ) : null}
                 </div>
               </div>
 
