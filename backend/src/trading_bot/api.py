@@ -1,16 +1,20 @@
 from __future__ import annotations
 
+import json
+import uuid
 from dataclasses import asdict
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Optional
 
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import RedirectResponse
 from pydantic import BaseModel, Field
+from sse_starlette.sse import EventSourceResponse
 
 from trading_bot.app import TradingBotApp, create_app
 from trading_bot.models import StrategyType
+from trading_bot.services.ai import AgentDeps, create_agent, stream_chat
 
 
 class UserScopedRequest(BaseModel):
@@ -67,6 +71,12 @@ class BacktestRequest(UserScopedRequest):
 
 class DepositRequest(UserScopedRequest):
     amount_usd: float = Field(gt=0)
+
+
+class ChatRequest(BaseModel):
+    message: str = Field(min_length=1)
+    conversation_id: Optional[str] = None
+    user_id: str = "demo-user"
 
 
 class BotControlRequest(UserScopedRequest):
@@ -213,7 +223,164 @@ def create_api(trading_app: Optional[TradingBotApp] = None) -> FastAPI:
             user_name=payload.user_name,
         )
 
+    # ── AI Chat ───────────────────────────────────────────────────────
+
+    if not app_state.settings.ai.enabled:
+
+        @api.post("/api/ai/chat")
+        def ai_chat_disabled(payload: ChatRequest) -> dict:
+            raise HTTPException(
+                status_code=503,
+                detail="AI chat is disabled. Set TRADING_BOT_AI_ENABLED=true to enable.",
+            )
+
+        @api.get("/api/ai/history")
+        def ai_history_disabled(
+            conversation_id: str = Query(...),
+        ) -> dict:
+            raise HTTPException(
+                status_code=503,
+                detail="AI chat is disabled. Set TRADING_BOT_AI_ENABLED=true to enable.",
+            )
+    else:
+        ai_agent = create_agent(app_state.settings.ai)
+
+        @api.post("/api/ai/chat")
+        async def ai_chat(payload: ChatRequest):
+            timestamp = datetime.now(timezone.utc).isoformat()
+            paper_store = app_state.paper_store
+            deps = AgentDeps(trading_app=app_state, user_id=payload.user_id)
+
+            conversation_id = payload.conversation_id
+            if not conversation_id:
+                conversation_id = f"conv-{uuid.uuid4().hex[:12]}"
+                paper_store.create_chat_conversation(
+                    conversation_id=conversation_id,
+                    user_id=payload.user_id,
+                    title=payload.message[:80],
+                    timestamp=timestamp,
+                )
+
+            paper_store.save_chat_message(
+                conversation_id=conversation_id,
+                role="user",
+                content=payload.message,
+                timestamp=timestamp,
+            )
+
+            raw_messages = paper_store.list_chat_messages(
+                conversation_id=conversation_id,
+            )
+            message_history = _build_message_history(raw_messages)
+
+            async def event_generator():
+                full_response = ""
+                async for event in stream_chat(ai_agent, deps, payload.message, message_history):
+                    event_type = event["type"]
+                    if event_type == "token":
+                        full_response += event["content"]
+                        yield {
+                            "event": "token",
+                            "data": json.dumps({"content": event["content"]}),
+                        }
+                    elif event_type == "tool_call":
+                        yield {
+                            "event": "tool_call",
+                            "data": json.dumps(
+                                {
+                                    "tool": event["tool"],
+                                    "args": event["args"],
+                                }
+                            ),
+                        }
+                    elif event_type == "tool_result":
+                        yield {
+                            "event": "tool_result",
+                            "data": json.dumps(
+                                {
+                                    "tool": event["tool"],
+                                    "content": event["content"],
+                                }
+                            ),
+                        }
+                    elif event_type == "error":
+                        yield {
+                            "event": "error",
+                            "data": json.dumps({"content": event["content"]}),
+                        }
+                    elif event_type == "done":
+                        ts = datetime.now(timezone.utc).isoformat()
+                        paper_store.save_chat_message(
+                            conversation_id=conversation_id,
+                            role="assistant",
+                            content=full_response,
+                            timestamp=ts,
+                        )
+                        yield {
+                            "event": "done",
+                            "data": json.dumps({"conversation_id": conversation_id}),
+                        }
+
+            return EventSourceResponse(event_generator())
+
+        @api.get("/api/ai/history")
+        def ai_history(
+            conversation_id: str = Query(...),
+        ) -> dict:
+            paper_store = app_state.paper_store
+            conversation = paper_store.get_chat_conversation(
+                conversation_id=conversation_id,
+            )
+            if conversation is None:
+                raise HTTPException(status_code=404, detail="Conversation not found.")
+            messages = paper_store.list_chat_messages(
+                conversation_id=conversation_id,
+            )
+            return {
+                "conversation": conversation,
+                "messages": messages,
+            }
+
+        @api.get("/api/ai/conversations")
+        def ai_conversations(
+            user_id: str = Query(default="demo-user"),
+        ) -> dict:
+            paper_store = app_state.paper_store
+            conversations = paper_store.list_chat_conversations(user_id=user_id)
+            return {"conversations": conversations}
+
     return api
 
 
 app = create_api()
+
+
+def _build_message_history(raw_messages: list[dict]) -> list:
+    """Convert persisted chat messages into PydanticAI message history format."""
+    from pydantic_ai.messages import (
+        ModelRequest,
+        ModelResponse,
+        TextPart,
+        ToolReturnPart,
+        UserPromptPart,
+    )
+
+    messages = []
+    for msg in raw_messages:
+        if msg["role"] == "user":
+            messages.append(ModelRequest(parts=[UserPromptPart(content=msg["content"])]))
+        elif msg["role"] == "assistant":
+            messages.append(ModelResponse(parts=[TextPart(content=msg["content"])]))
+        elif msg["role"] == "tool" and msg.get("toolName"):
+            messages.append(
+                ModelRequest(
+                    parts=[
+                        ToolReturnPart(
+                            tool_name=msg["toolName"],
+                            content=msg["content"],
+                            tool_call_id=f"tool-{msg.get('toolName', 'unknown')}",
+                        )
+                    ]
+                )
+            )
+    return messages

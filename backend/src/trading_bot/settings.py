@@ -5,6 +5,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional
 
+REPO_ROOT = Path(__file__).resolve().parents[3]
+
 
 def _parse_bool(raw: str, default: bool = False) -> bool:
     if raw is None:
@@ -39,6 +41,8 @@ class AISettings:
     provider: str
     enabled: bool
     api_key: str
+    model_name: str
+    base_url: str
 
 
 @dataclass(frozen=True)
@@ -74,14 +78,22 @@ class AppSettings:
     market_data: MarketDataSettings
 
 
+def _resolve_relative_path(raw: str) -> Path:
+    """Resolve a path from env, making it absolute relative to the repo root."""
+    path = Path(raw)
+    if not path.is_absolute():
+        return REPO_ROOT / path
+    return path
+
+
 def load_settings() -> AppSettings:
     runtime = RuntimeSettings(
         environment=os.getenv("TRADING_BOT_ENV", "development"),
         symbol=_normalize_symbol(os.getenv("TRADING_BOT_SYMBOL", "BTCUSDT")),
         log_level=os.getenv("TRADING_BOT_LOG_LEVEL", "INFO").upper(),
-        state_dir=Path(os.getenv("TRADING_BOT_STATE_DIR", ".data/state")),
-        log_dir=Path(os.getenv("TRADING_BOT_LOG_DIR", ".data/logs")),
-        history_dir=Path(
+        state_dir=_resolve_relative_path(os.getenv("TRADING_BOT_STATE_DIR", ".data/state")),
+        log_dir=_resolve_relative_path(os.getenv("TRADING_BOT_LOG_DIR", ".data/logs")),
+        history_dir=_resolve_relative_path(
             os.getenv("TRADING_BOT_HISTORY_DIR", ".data/binance/spot/monthly/klines")
         ),
     )
@@ -99,9 +111,11 @@ def load_settings() -> AppSettings:
         raise ValueError("TRADING_BOT_EXCHANGE_MARKET_TYPE must be 'spot' for this MVP.")
 
     ai = AISettings(
-        provider=os.getenv("TRADING_BOT_AI_PROVIDER", "xai"),
+        provider=os.getenv("TRADING_BOT_AI_PROVIDER", "openrouter"),
         enabled=_parse_bool(os.getenv("TRADING_BOT_AI_ENABLED", "false")),
         api_key=os.getenv("TRADING_BOT_AI_API_KEY", ""),
+        model_name=os.getenv("TRADING_BOT_AI_MODEL", "google/gemini-2.5-flash"),
+        base_url=os.getenv("TRADING_BOT_AI_BASE_URL", "https://openrouter.ai/api/v1"),
     )
     api = APISettings(
         host=os.getenv("TRADING_BOT_API_HOST", "127.0.0.1"),
