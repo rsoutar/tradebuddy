@@ -9,6 +9,11 @@ from pathlib import Path
 from dotenv import load_dotenv
 from trading_bot.app import create_app
 from trading_bot.models import GridBotConfig, StrategyType
+from trading_bot.services.binance_archive_download import (
+    default_output_dir,
+    default_prefix,
+    download_archives,
+)
 from trading_bot.services.backtesting import GridBacktestRunner
 from trading_bot.services.historical_data import BinanceHistoricalKlineLoader
 from trading_bot.settings import load_settings
@@ -54,6 +59,26 @@ def build_parser() -> argparse.ArgumentParser:
     history_parser.add_argument(
         "--end",
         help="Optional exclusive UTC end datetime, e.g. 2024-02-01 or 2024-02-01T00:00:00+00:00",
+    )
+
+    download_parser = subparsers.add_parser(
+        "download-history",
+        help="Download Binance monthly kline archives into the configured history directory",
+    )
+    download_parser.add_argument("--symbol", default="BTCUSDT", help="Trading symbol, e.g. BTCUSDT")
+    download_parser.add_argument("--interval", default="15m", help="Kline interval, e.g. 15m")
+    download_parser.add_argument(
+        "--prefix",
+        help="Optional Binance bucket prefix override",
+    )
+    download_parser.add_argument(
+        "--output-dir",
+        help="Optional output directory override",
+    )
+    download_parser.add_argument(
+        "--overwrite",
+        action="store_true",
+        help="Redownload files even when the local size already matches.",
     )
 
     backtest_parser = subparsers.add_parser(
@@ -131,6 +156,36 @@ def main() -> None:
                     start=_parse_datetime(args.start),
                     end=_parse_datetime(args.end),
                 ),
+                indent=2,
+            )
+        )
+        return
+
+    if args.command == "download-history":
+        settings = load_settings()
+        prefix = args.prefix or default_prefix(symbol=args.symbol, interval=args.interval)
+        output_dir = (
+            Path(args.output_dir)
+            if args.output_dir
+            else default_output_dir(
+                settings.runtime.history_dir,
+                symbol=args.symbol,
+                interval=args.interval,
+            )
+        )
+        downloaded, skipped, resolved_output_dir = download_archives(
+            prefix=prefix,
+            output_dir=output_dir,
+            overwrite=args.overwrite,
+        )
+        print(
+            json.dumps(
+                {
+                    "prefix": prefix,
+                    "outputDir": str(resolved_output_dir),
+                    "downloaded": downloaded,
+                    "skipped": skipped,
+                },
                 indent=2,
             )
         )
