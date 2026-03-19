@@ -109,6 +109,25 @@ class PaperTradingStore:
                     created_at TEXT NOT NULL,
                     FOREIGN KEY(user_id) REFERENCES paper_accounts(user_id) ON DELETE CASCADE
                 );
+
+                CREATE TABLE IF NOT EXISTS chat_conversations (
+                    id TEXT PRIMARY KEY,
+                    user_id TEXT NOT NULL,
+                    title TEXT NOT NULL,
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL
+                );
+
+                CREATE TABLE IF NOT EXISTS chat_messages (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    conversation_id TEXT NOT NULL,
+                    role TEXT NOT NULL,
+                    content TEXT NOT NULL,
+                    tool_name TEXT,
+                    tool_args_json TEXT,
+                    created_at TEXT NOT NULL,
+                    FOREIGN KEY(conversation_id) REFERENCES chat_conversations(id) ON DELETE CASCADE
+                );
                 """
             )
             self._ensure_column(connection, "paper_accounts", "btc_balance", "REAL NOT NULL DEFAULT 0")
@@ -1794,3 +1813,125 @@ class PaperTradingStore:
             }
             for row in rows
         ]
+
+    # ── Chat persistence ──────────────────────────────────────────────
+
+    def create_chat_conversation(
+        self,
+        *,
+        conversation_id: str,
+        user_id: str,
+        title: str,
+        timestamp: str,
+    ) -> dict[str, Any]:
+        with self._connect() as connection:
+            connection.execute(
+                """
+                INSERT INTO chat_conversations (id, user_id, title, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?)
+                """,
+                (conversation_id, user_id, title, timestamp, timestamp),
+            )
+        return {
+            "id": conversation_id,
+            "userId": user_id,
+            "title": title,
+            "createdAt": timestamp,
+            "updatedAt": timestamp,
+        }
+
+    def save_chat_message(
+        self,
+        *,
+        conversation_id: str,
+        role: str,
+        content: str,
+        tool_name: Optional[str] = None,
+        tool_args_json: Optional[str] = None,
+        timestamp: str,
+    ) -> None:
+        with self._connect() as connection:
+            connection.execute(
+                """
+                INSERT INTO chat_messages (conversation_id, role, content, tool_name, tool_args_json, created_at)
+                VALUES (?, ?, ?, ?, ?, ?)
+                """,
+                (conversation_id, role, content, tool_name, tool_args_json, timestamp),
+            )
+            connection.execute(
+                """
+                UPDATE chat_conversations SET updated_at = ? WHERE id = ?
+                """,
+                (timestamp, conversation_id),
+            )
+
+    def list_chat_messages(
+        self, *, conversation_id: str, limit: int = 100
+    ) -> list[dict[str, Any]]:
+        with self._connect() as connection:
+            rows = connection.execute(
+                """
+                SELECT role, content, tool_name, tool_args_json, created_at
+                FROM chat_messages
+                WHERE conversation_id = ?
+                ORDER BY id ASC
+                LIMIT ?
+                """,
+                (conversation_id, limit),
+            ).fetchall()
+        return [
+            {
+                "role": row["role"],
+                "content": row["content"],
+                "toolName": row["tool_name"],
+                "toolArgsJson": row["tool_args_json"],
+                "timestamp": row["created_at"],
+            }
+            for row in rows
+        ]
+
+    def list_chat_conversations(
+        self, *, user_id: str, limit: int = 20
+    ) -> list[dict[str, Any]]:
+        with self._connect() as connection:
+            rows = connection.execute(
+                """
+                SELECT id, title, created_at, updated_at
+                FROM chat_conversations
+                WHERE user_id = ?
+                ORDER BY updated_at DESC
+                LIMIT ?
+                """,
+                (user_id, limit),
+            ).fetchall()
+        return [
+            {
+                "id": row["id"],
+                "title": row["title"],
+                "createdAt": row["created_at"],
+                "updatedAt": row["updated_at"],
+            }
+            for row in rows
+        ]
+
+    def get_chat_conversation(
+        self, *, conversation_id: str
+    ) -> Optional[dict[str, Any]]:
+        with self._connect() as connection:
+            row = connection.execute(
+                """
+                SELECT id, user_id, title, created_at, updated_at
+                FROM chat_conversations
+                WHERE id = ?
+                """,
+                (conversation_id,),
+            ).fetchone()
+        if row is None:
+            return None
+        return {
+            "id": row["id"],
+            "userId": row["user_id"],
+            "title": row["title"],
+            "createdAt": row["created_at"],
+            "updatedAt": row["updated_at"],
+        }

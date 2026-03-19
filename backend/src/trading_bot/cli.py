@@ -4,7 +4,9 @@ import argparse
 import json
 from dataclasses import asdict
 from datetime import datetime, timezone
+from pathlib import Path
 
+from dotenv import load_dotenv
 from trading_bot.app import create_app
 from trading_bot.models import GridBotConfig, StrategyType
 from trading_bot.services.backtesting import GridBacktestRunner
@@ -101,6 +103,8 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def main() -> None:
+    load_dotenv(Path(__file__).resolve().parents[3] / ".env", override=False)
+
     parser = build_parser()
     args = parser.parse_args()
 

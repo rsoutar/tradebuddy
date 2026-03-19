@@ -815,3 +815,53 @@ export const depositPaperFunds = createServerFn({ method: 'POST' }).handler(
     return payload.dashboard
   },
 )
+
+// ── AI Chat ──────────────────────────────────────────────────────────
+
+export type ChatConversation = {
+  id: string
+  title: string
+  createdAt: string
+  updatedAt: string
+}
+
+export type ChatHistoryMessage = {
+  role: string
+  content: string
+  toolName?: string | null
+  toolArgsJson?: string | null
+  timestamp: string
+}
+
+export type ChatHistoryResponse = {
+  conversation: ChatConversation
+  messages: ChatHistoryMessage[]
+}
+
+export type ChatConversationsResponse = {
+  conversations: ChatConversation[]
+}
+
+export const getChatHistory = createServerFn({ method: 'GET' }).handler(
+  async ({ data }) => {
+    const conversationId = (data ?? '') as string
+    if (!conversationId) {
+      throw new Error('conversation_id is required')
+    }
+    const url = new URL('/api/ai/history', getBackendApiBaseUrl())
+    url.searchParams.set('conversation_id', conversationId)
+    const payload = await fetchBackend<ChatHistoryResponse>(url.toString())
+    return payload
+  },
+)
+
+export const getChatConversations = createServerFn({ method: 'GET' }).handler(
+  async () => {
+    const session = await useSession<SessionData>(getSessionConfig())
+    const userId = session.data.user?.userId ?? 'demo-user'
+    const url = new URL('/api/ai/conversations', getBackendApiBaseUrl())
+    url.searchParams.set('user_id', userId)
+    const payload = await fetchBackend<ChatConversationsResponse>(url.toString())
+    return payload
+  },
+)

@@ -211,7 +211,9 @@ class TradingBotApp:
         strategy = self._build_strategy(strategy_type, snapshot, strategy_config)
         evaluation = strategy.evaluate(snapshot, balances)
         risk = self.risk_manager.review(balances, evaluation.orders)
-        notional = sum((order.price or snapshot.price) * order.amount for order in evaluation.orders)
+        notional = sum(
+            (order.price or snapshot.price) * order.amount for order in evaluation.orders
+        )
         return {
             "strategy": strategy_type,
             "config": strategy_config,
@@ -231,7 +233,10 @@ class TradingBotApp:
                 raise ValueError("Grid budget validation requires a grid configuration.")
             buy_levels = [level for level in config.price_levels() if level < snapshot.price]
             if not buy_levels:
-                return 0.0, "Grid range needs at least one buy level below the live price to deploy budget."
+                return (
+                    0.0,
+                    "Grid range needs at least one buy level below the live price to deploy budget.",
+                )
             required_budget = (len(buy_levels) * MIN_EFFECTIVE_ORDER_USD) / 0.45
             return round(required_budget, 2), None
 
@@ -243,7 +248,9 @@ class TradingBotApp:
             return round(required_budget, 2), None
 
         if not isinstance(config, InfinityGridBotConfig):
-            raise ValueError("Infinity grid budget validation requires an infinity grid configuration.")
+            raise ValueError(
+                "Infinity grid budget validation requires an infinity grid configuration."
+            )
         required_budget = config.order_size_usd * config.levels_per_side * 2
         return round(required_budget, 2), None
 
@@ -311,11 +318,18 @@ class TradingBotApp:
             2,
         )
         max_drawdown_pct = round(
-            max(0.8, (snapshot.volatility_24h_pct * drawdown_modifiers[strategy_type]) + warning_count),
+            max(
+                0.8,
+                (snapshot.volatility_24h_pct * drawdown_modifiers[strategy_type]) + warning_count,
+            ),
             1,
         )
-        win_rate_pct = round(max(35.0, min(92.0, 56.0 + (order_count * 1.7) - (warning_count * 6))), 1)
-        sharpe_ratio = round(max(0.4, min(3.2, (paper_pnl_pct / max(max_drawdown_pct, 0.8)) + 0.55)), 2)
+        win_rate_pct = round(
+            max(35.0, min(92.0, 56.0 + (order_count * 1.7) - (warning_count * 6))), 1
+        )
+        sharpe_ratio = round(
+            max(0.4, min(3.2, (paper_pnl_pct / max(max_drawdown_pct, 0.8)) + 0.55)), 2
+        )
         status = "idle"
         if (
             account_state["bot_status"] == "paper-running"
@@ -415,7 +429,8 @@ class TradingBotApp:
 
     def _reserve_total_usd(self, account_state: dict[str, Any], snapshot: MarketSnapshot) -> float:
         return round(
-            float(account_state["usd_balance"]) + (float(account_state["btc_balance"]) * snapshot.price),
+            float(account_state["usd_balance"])
+            + (float(account_state["btc_balance"]) * snapshot.price),
             2,
         )
 
@@ -464,7 +479,9 @@ class TradingBotApp:
                     break
                 if index == 0 and deposit_time == point_time:
                     break
-                cumulative_deposits_usd = round(cumulative_deposits_usd + float(deposit["amountUsd"]), 2)
+                cumulative_deposits_usd = round(
+                    cumulative_deposits_usd + float(deposit["amountUsd"]), 2
+                )
                 deposit_index += 1
 
             net_contributions_usd = round(initial_contribution_usd + cumulative_deposits_usd, 2)
@@ -493,7 +510,9 @@ class TradingBotApp:
         remaining_budget_usd = round(remaining_budget_usd - usd_consumed, 8)
 
         if remaining_budget_usd > 0:
-            btc_needed = round(remaining_budget_usd / snapshot.price, 8) if snapshot.price > 0 else 0.0
+            btc_needed = (
+                round(remaining_budget_usd / snapshot.price, 8) if snapshot.price > 0 else 0.0
+            )
             if next_btc_balance + 1e-9 < btc_needed:
                 raise ValueError("Reserve BTC is insufficient to cover the requested budget.")
             next_btc_balance = round(max(next_btc_balance - btc_needed, 0.0), 8)
@@ -511,7 +530,9 @@ class TradingBotApp:
         balances: list[Balance],
         orders: list[OrderIntent],
     ) -> list[OrderIntent]:
-        remaining_usdt = next((balance.free for balance in balances if balance.asset == "USDT"), 0.0)
+        remaining_usdt = next(
+            (balance.free for balance in balances if balance.asset == "USDT"), 0.0
+        )
         remaining_btc = next((balance.free for balance in balances if balance.asset == "BTC"), 0.0)
         executable: list[OrderIntent] = []
 
@@ -606,7 +627,9 @@ class TradingBotApp:
             )
             refreshed_active_strategies = [
                 self._active_strategy_summary(active_bot, snapshot)
-                for active_bot in self.paper_store.list_active_strategies(user_id=refreshed_bot["userId"])
+                for active_bot in self.paper_store.list_active_strategies(
+                    user_id=refreshed_bot["userId"]
+                )
             ]
             self._record_portfolio_snapshot(
                 user_id=refreshed_bot["userId"],
@@ -660,7 +683,9 @@ class TradingBotApp:
         position_value_usd = round(current_btc_balance * snapshot.price, 2)
         unrealized_pnl_usd = round(position_value_usd - position_cost_usd, 2)
         unrealized_pnl_pct = (
-            round((unrealized_pnl_usd / position_cost_usd) * 100, 2) if position_cost_usd > 0 else 0.0
+            round((unrealized_pnl_usd / position_cost_usd) * 100, 2)
+            if position_cost_usd > 0
+            else 0.0
         )
         total_pnl_usd = round(current_equity_usd - budget_usd, 2)
         total_pnl_pct = round((total_pnl_usd / budget_usd) * 100, 2) if budget_usd > 0 else 0.0
@@ -686,14 +711,20 @@ class TradingBotApp:
         config = bot_row["config"]
         if bot_row["strategy"] == StrategyType.GRID.value:
             grid_config = self._grid_config_from_payload(config)
-            level_count = len(grid_config.price_levels()) if grid_config is not None else int(config["grid_count"])
+            level_count = (
+                len(grid_config.price_levels())
+                if grid_config is not None
+                else int(config["grid_count"])
+            )
             stop_loss_summary = (
                 f" • stop loss {config['stop_loss_pct']:.1f}%"
                 if config.get("stop_loss_enabled") and config.get("stop_loss_pct") is not None
                 else " • stop loss off"
             )
             upper_stop_summary = (
-                " • stop at upper on" if config.get("stop_at_upper_enabled") else " • stop at upper off"
+                " • stop at upper on"
+                if config.get("stop_at_upper_enabled")
+                else " • stop at upper off"
             )
             config_summary = (
                 f"Range ${config['lower_price']:,.0f} to ${config['upper_price']:,.0f} "
@@ -739,6 +770,9 @@ class TradingBotApp:
     ) -> Optional[GridBotConfig]:
         if not config_payload:
             return None
+        required = ("lower_price", "upper_price", "grid_count", "spacing_pct")
+        if not all(k in config_payload for k in required):
+            return None
         return GridBotConfig(
             lower_price=float(config_payload["lower_price"]),
             upper_price=float(config_payload["upper_price"]),
@@ -758,6 +792,9 @@ class TradingBotApp:
     ) -> Optional[RebalanceBotConfig]:
         if not config_payload:
             return None
+        required = ("target_btc_ratio", "rebalance_threshold_pct", "interval_minutes")
+        if not all(k in config_payload for k in required):
+            return None
         return RebalanceBotConfig(
             target_btc_ratio=float(config_payload["target_btc_ratio"]),
             rebalance_threshold_pct=float(config_payload["rebalance_threshold_pct"]),
@@ -769,6 +806,9 @@ class TradingBotApp:
     ) -> Optional[InfinityGridBotConfig]:
         if not config_payload:
             return None
+        has_reference = "reference_price" in config_payload or "lower_start_price" in config_payload
+        if not has_reference or "spacing_pct" not in config_payload:
+            return None
         if "reference_price" in config_payload:
             reference_price = float(config_payload["reference_price"])
         else:
@@ -777,10 +817,14 @@ class TradingBotApp:
             reference_price=reference_price,
             spacing_pct=float(config_payload["spacing_pct"]),
             order_size_usd=float(config_payload.get("order_size_usd", 100.0)),
-            levels_per_side=int(config_payload.get("levels_per_side", config_payload.get("max_active_grids", 6))),
+            levels_per_side=int(
+                config_payload.get("levels_per_side", config_payload.get("max_active_grids", 6))
+            ),
         )
 
-    def dashboard(self, user_id: str = "demo-user", user_name: str = "Demo Trader") -> dict[str, Any]:
+    def dashboard(
+        self, user_id: str = "demo-user", user_name: str = "Demo Trader"
+    ) -> dict[str, Any]:
         self._reconcile_user_bots(user_id)
         snapshot = self.market_data.get_snapshot(self.settings.runtime.symbol)
         account_state = self.paper_store.ensure_account(
@@ -804,7 +848,9 @@ class TradingBotApp:
             available_reserve_usd + sum(bot["currentEquityUsd"] for bot in active_strategies),
             2,
         )
-        allocated_capital_usd = round(sum(bot.get("budgetUsd", 0.0) for bot in active_strategies), 2)
+        allocated_capital_usd = round(
+            sum(bot.get("budgetUsd", 0.0) for bot in active_strategies), 2
+        )
         portfolio_snapshots = self.paper_store.list_portfolio_snapshots(user_id=user_id, limit=96)
         if not portfolio_snapshots:
             portfolio_snapshots = [
@@ -826,13 +872,17 @@ class TradingBotApp:
         )
         if prior_portfolio_snapshot is None:
             prior_portfolio_snapshot = performance_points[0]
-        profit_24h_usd = round(current_snapshot["equityUsd"] - prior_portfolio_snapshot["equityUsd"], 2)
+        profit_24h_usd = round(
+            current_snapshot["equityUsd"] - prior_portfolio_snapshot["equityUsd"], 2
+        )
         baseline_equity = (
             prior_portfolio_snapshot["totalEquityUsd"]
             if datetime.fromisoformat(prior_portfolio_snapshot["timestamp"]) <= prior_cutoff
             else round(total_portfolio_usd - current_snapshot["equityUsd"], 2)
         )
-        profit_24h_pct = round((profit_24h_usd / baseline_equity) * 100, 2) if baseline_equity > 0 else 0.0
+        profit_24h_pct = (
+            round((profit_24h_usd / baseline_equity) * 100, 2) if baseline_equity > 0 else 0.0
+        )
 
         total_notional = sum(item["notional"] for item in evaluations)
         if total_notional <= 0:
@@ -960,7 +1010,9 @@ class TradingBotApp:
                 end=normalized_end,
             )
             if not window_candles:
-                raise ValueError("No historical candles available for the requested backtest window.")
+                raise ValueError(
+                    "No historical candles available for the requested backtest window."
+                )
             initial_snapshot = MarketSnapshot(
                 symbol=self.settings.runtime.symbol,
                 price=window_candles[0].open,
@@ -988,7 +1040,11 @@ class TradingBotApp:
                 completed_at=datetime.fromisoformat(completed_at),
             )
             last_backtest = backtest.to_summary()
-            tone = "warning" if backtest.stop_loss_triggered or backtest.upper_price_stop_triggered else "neutral"
+            tone = (
+                "warning"
+                if backtest.stop_loss_triggered or backtest.upper_price_stop_triggered
+                else "neutral"
+            )
         elif strategy_type is StrategyType.REBALANCE:
             runner = RebalanceBacktestRunner(
                 self.historical_loader,
@@ -1010,7 +1066,9 @@ class TradingBotApp:
                 end=normalized_end,
             )
             if not window_candles:
-                raise ValueError("No historical candles available for the requested backtest window.")
+                raise ValueError(
+                    "No historical candles available for the requested backtest window."
+                )
             initial_snapshot = MarketSnapshot(
                 symbol=self.settings.runtime.symbol,
                 price=window_candles[0].open,
@@ -1062,7 +1120,9 @@ class TradingBotApp:
                 end=normalized_end,
             )
             if not window_candles:
-                raise ValueError("No historical candles available for the requested backtest window.")
+                raise ValueError(
+                    "No historical candles available for the requested backtest window."
+                )
             initial_snapshot = MarketSnapshot(
                 symbol=self.settings.runtime.symbol,
                 price=window_candles[0].open,
@@ -1129,7 +1189,9 @@ class TradingBotApp:
         )
         return self.dashboard(user_id=user_id, user_name=user_name)
 
-    def trade_history(self, user_id: str = "demo-user", user_name: str = "Demo Trader") -> dict[str, Any]:
+    def trade_history(
+        self, user_id: str = "demo-user", user_name: str = "Demo Trader"
+    ) -> dict[str, Any]:
         self._reconcile_user_bots(user_id)
         account_state = self.paper_store.ensure_account(
             user_id=user_id,
@@ -1157,7 +1219,9 @@ class TradingBotApp:
             "trades": trades,
         }
 
-    def bot_activity(self, user_id: str = "demo-user", user_name: str = "Demo Trader") -> dict[str, Any]:
+    def bot_activity(
+        self, user_id: str = "demo-user", user_name: str = "Demo Trader"
+    ) -> dict[str, Any]:
         self._reconcile_user_bots(user_id)
         self.paper_store.ensure_account(
             user_id=user_id,
@@ -1277,16 +1341,24 @@ class TradingBotApp:
             self.process_manager.start_bot(created_bot_id)
         return self.dashboard(user_id=user_id, user_name=user_name)
 
-    def start_bot(self, bot_id: str, user_id: str = "demo-user", user_name: str = "Demo Trader") -> dict[str, Any]:
-        self.paper_store.ensure_account(user_id=user_id, user_name=user_name, timestamp=self._timestamp())
+    def start_bot(
+        self, bot_id: str, user_id: str = "demo-user", user_name: str = "Demo Trader"
+    ) -> dict[str, Any]:
+        self.paper_store.ensure_account(
+            user_id=user_id, user_name=user_name, timestamp=self._timestamp()
+        )
         bot = self.paper_store.get_bot_instance(bot_id=bot_id)
         if bot is None or bot["userId"] != user_id:
             raise ValueError("Bot not found for this user.")
         self.process_manager.start_bot(bot_id)
         return self.dashboard(user_id=user_id, user_name=user_name)
 
-    def stop_bot(self, bot_id: str, user_id: str = "demo-user", user_name: str = "Demo Trader") -> dict[str, Any]:
-        self.paper_store.ensure_account(user_id=user_id, user_name=user_name, timestamp=self._timestamp())
+    def stop_bot(
+        self, bot_id: str, user_id: str = "demo-user", user_name: str = "Demo Trader"
+    ) -> dict[str, Any]:
+        self.paper_store.ensure_account(
+            user_id=user_id, user_name=user_name, timestamp=self._timestamp()
+        )
         bot = self.paper_store.get_bot_instance(bot_id=bot_id)
         if bot is None or bot["userId"] != user_id:
             raise ValueError("Bot not found for this user.")
