@@ -230,6 +230,47 @@ export type InfinityGridBotInput = {
   levelsPerSide: number
 }
 
+export type AiBotDraft = {
+  generatedAt: string
+  strategy: StrategyKey
+  strategyLabel: string
+  budgetUsd: number
+  availableReserveUsd: number
+  requiredBudgetUsd: number
+  fitsBudget: boolean
+  marketSnapshot: {
+    symbol: string
+    price: number
+    change24hPct: number
+    volatility24hPct: number
+    trend: string
+  }
+  headline: string
+  rationale: string
+  highlights: string[]
+  configSummary: string
+  gridConfig?: {
+    lower_price: number
+    upper_price: number
+    grid_count: number
+    spacing_pct: number
+    stop_at_upper_enabled?: boolean
+    stop_loss_enabled?: boolean
+    stop_loss_pct?: number | null
+  } | null
+  rebalanceConfig?: {
+    target_btc_ratio: number
+    rebalance_threshold_pct: number
+    interval_minutes: number
+  } | null
+  infinityConfig?: {
+    reference_price: number
+    spacing_pct: number
+    order_size_usd: number
+    levels_per_side: number
+  } | null
+}
+
 export type BacktestInput = {
   strategy: StrategyKey
   startAt?: string
@@ -757,6 +798,30 @@ export const createBot = createServerFn({ method: 'POST' }).handler(async ({ dat
   )
 
   return payload.dashboard
+})
+
+export const getAiBotDraft = createServerFn({ method: 'POST' }).handler(async ({ data }) => {
+  const input = (data ?? {}) as {
+    strategy: StrategyKey
+    budgetUsd: number
+  }
+  const session = await useSession<SessionData>(getSessionConfig())
+
+  if (!session.data.user) {
+    throw new Error('You need to sign in before using AI bot setup.')
+  }
+
+  return fetchBackend<AiBotDraft>(new URL('/api/bots/draft', getBackendApiBaseUrl()).toString(), {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      strategy: input.strategy,
+      budget_usd: input.budgetUsd,
+      ...getUserScope(session.data.user),
+    }),
+  })
 })
 
 export const stopBot = createServerFn({ method: 'POST' }).handler(async ({ data }) => {

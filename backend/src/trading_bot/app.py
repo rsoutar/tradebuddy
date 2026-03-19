@@ -254,6 +254,181 @@ class TradingBotApp:
         required_budget = config.order_size_usd * config.levels_per_side * 2
         return round(required_budget, 2), None
 
+    def _config_summary(
+        self,
+        strategy_type: StrategyType,
+        config: dict[str, Any],
+        snapshot: MarketSnapshot,
+    ) -> str:
+        if strategy_type is StrategyType.GRID:
+            level_count = int(config.get("grid_count", 0))
+            grid_config = self._grid_config_from_payload(config)
+            if grid_config is not None:
+                level_count = len(grid_config.price_levels())
+            stop_loss_summary = (
+                f" • stop loss {config['stop_loss_pct']:.1f}%"
+                if config.get("stop_loss_enabled") and config.get("stop_loss_pct") is not None
+                else " • stop loss off"
+            )
+            upper_stop_summary = (
+                " • stop at upper on"
+                if config.get("stop_at_upper_enabled")
+                else " • stop at upper off"
+            )
+            return (
+                f"Range ${config['lower_price']:,.0f} to ${config['upper_price']:,.0f} "
+                f"across {level_count} levels{stop_loss_summary}{upper_stop_summary}"
+            )
+
+        if strategy_type is StrategyType.REBALANCE:
+            return (
+                f"Target BTC {config['target_btc_ratio'] * 100:.0f}% with "
+                f"{config['rebalance_threshold_pct']:.1f}% drift threshold"
+            )
+
+        return (
+            f"Reference ${config.get('reference_price', config.get('lower_start_price', snapshot.price)):,.0f} • "
+            f"{int(config.get('levels_per_side', config.get('max_active_grids', 6)))} levels per side • "
+            f"${float(config.get('order_size_usd', 100.0)):,.0f} per order • "
+            f"{float(config['spacing_pct']):.1f}% spacing"
+        )
+
+    def _build_managed_bot_setup(
+        self,
+        strategy_type: StrategyType,
+        *,
+        budget_usd: float,
+        snapshot: MarketSnapshot,
+    ) -> tuple[
+        Union[GridBotConfig, RebalanceBotConfig, InfinityGridBotConfig],
+        str,
+        str,
+        list[str],
+    ]:
+        def clamp(value: float, minimum: float, maximum: float) -> float:
+            return max(minimum, min(maximum, value))
+
+        volatility = clamp(snapshot.volatility_24h_pct or 0.0, 1.5, 12.0)
+        trend = snapshot.trend.lower()
+        is_bullish = "bull" in trend or "up" in trend
+        is_bearish = "bear" in trend or "down" in trend
+
+        if strategy_type is StrategyType.GRID:
+            downside_width_pct = clamp(volatility * (1.9 if is_bearish else 1.55), 4.5, 16.0)
+            upside_width_pct = clamp(volatility * (1.9 if is_bullish else 1.45), 4.5, 16.0)
+            spacing_pct = round(clamp(volatility * 0.55, 1.2, 3.4), 1)
+            grid_count = int(round(clamp((downside_width_pct + upside_width_pct) / spacing_pct, 6, 14)))
+            stop_loss_enabled = volatility >= 6.0 or is_bearish
+            stop_loss_pct = round(clamp(downside_width_pct + 2.5, 6.0, 18.0), 1)
+
+            config = GridBotConfig(
+                lower_price=round(snapshot.price * (1 - downside_width_pct / 100), 2),
+                upper_price=round(snapshot.price * (1 + upside_width_pct / 100), 2),
+                grid_count=grid_count,
+                spacing_pct=spacing_pct,
+                stop_loss_enabled=stop_loss_enabled,
+                stop_loss_pct=stop_loss_pct if stop_loss_enabled else None,
+            )
+
+            required_budget_usd, _ = self._minimum_budget_required(strategy_type, snapshot, config)
+            while required_budget_usd > budget_usd and config.grid_count > 4:
+                config = GridBotConfig(
+                    lower_price=config.lower_price,
+                    upper_price=config.upper_price,
+                    grid_count=config.grid_count - 1,
+                    spacing_pct=round(config.spacing_pct + 0.2, 1),
+                    stop_loss_enabled=config.stop_loss_enabled,
+                    stop_loss_pct=config.stop_loss_pct,
+                )
+                required_budget_usd, _ = self._minimum_budget_required(strategy_type, snapshot, config)
+
+            buy_levels = len([level for level in config.price_levels() if level < snapshot.price])
+            headline = "AI Pilot widened the ladder around the live BTC regime."
+            rationale = (
+                f"BTC/USDT is printing {snapshot.trend} conditions with {snapshot.volatility_24h_pct:.1f}% "
+                f"24h volatility, so the launch range now stretches from ${config.lower_price:,.0f} "
+                f"to ${config.upper_price:,.0f} with {config.grid_count} levels and {config.spacing_pct:.1f}% spacing."
+            )
+            highlights = [
+                f"{buy_levels} buy levels sit below the current ${snapshot.price:,.0f} spot for immediate deployment.",
+                f"Budget target: ${budget_usd:,.0f} against an estimated minimum of ${required_budget_usd:,.0f}.",
+                (
+                    f"Safety rail enabled at {config.stop_loss_pct:.1f}% below the working band."
+                    if config.stop_loss_enabled and config.stop_loss_pct is not None
+                    else "Stop-loss is disabled so the grid can stay fully range-focused."
+                ),
+            ]
+            return config, headline, rationale, highlights
+
+        if strategy_type is StrategyType.REBALANCE:
+            target_btc_ratio = 0.5
+            if is_bullish:
+                target_btc_ratio = 0.58
+            elif is_bearish:
+                target_btc_ratio = 0.42
+            target_btc_ratio = round(
+                clamp(target_btc_ratio + (snapshot.change_24h_pct * 0.01), 0.35, 0.65), 2
+            )
+            rebalance_threshold_pct = round(clamp(volatility * 0.8, 2.5, 8.0), 1)
+            interval_minutes = 30 if volatility >= 7.5 else 45 if volatility >= 4.5 else 60
+
+            config = RebalanceBotConfig(
+                target_btc_ratio=target_btc_ratio,
+                rebalance_threshold_pct=rebalance_threshold_pct,
+                interval_minutes=interval_minutes,
+            )
+            required_budget_usd, _ = self._minimum_budget_required(strategy_type, snapshot, config)
+            headline = "AI Pilot centered the BTC allocation for steadier drift control."
+            rationale = (
+                f"With {snapshot.volatility_24h_pct:.1f}% daily volatility and a {snapshot.trend} tape, "
+                f"the setup keeps {target_btc_ratio * 100:.0f}% of the budget in BTC, waits for "
+                f"{rebalance_threshold_pct:.1f}% drift, and reviews exposure every {interval_minutes} minutes."
+            )
+            highlights = [
+                f"Budget target: ${budget_usd:,.0f} against an estimated minimum of ${required_budget_usd:,.0f}.",
+                f"Spot change is {snapshot.change_24h_pct:+.1f}% over 24h, so the ratio leans {'slightly long' if target_btc_ratio >= 0.5 else 'slightly defensive'}.",
+                "Switch to manual mode if you want a custom BTC allocation rather than the market-aware default.",
+            ]
+            return config, headline, rationale, highlights
+
+        levels_per_side = 3
+        if budget_usd >= 1200:
+            levels_per_side = 6
+        elif budget_usd >= 800:
+            levels_per_side = 5
+        elif budget_usd >= 500:
+            levels_per_side = 4
+        spacing_pct = round(clamp(volatility * 0.45, 0.9, 2.6), 1)
+        order_size_usd = round(max(MIN_EFFECTIVE_ORDER_USD, budget_usd * 0.42 / levels_per_side), 2)
+        config = InfinityGridBotConfig(
+            reference_price=round(snapshot.price, 2),
+            spacing_pct=spacing_pct,
+            order_size_usd=order_size_usd,
+            levels_per_side=levels_per_side,
+        )
+        required_budget_usd, _ = self._minimum_budget_required(strategy_type, snapshot, config)
+        if required_budget_usd > budget_usd:
+            config = InfinityGridBotConfig(
+                reference_price=config.reference_price,
+                spacing_pct=config.spacing_pct,
+                order_size_usd=round(max(MIN_EFFECTIVE_ORDER_USD, budget_usd * 0.48 / levels_per_side), 2),
+                levels_per_side=levels_per_side,
+            )
+            required_budget_usd, _ = self._minimum_budget_required(strategy_type, snapshot, config)
+
+        headline = "AI Pilot tuned a geometric ladder for trend follow-through."
+        rationale = (
+            f"BTC/USDT is carrying a {snapshot.trend} profile, so the ladder stays anchored at "
+            f"${config.reference_price:,.0f} with {config.levels_per_side} levels per side, "
+            f"{config.spacing_pct:.1f}% spacing, and ${config.order_size_usd:,.0f} clips."
+        )
+        highlights = [
+            f"Budget target: ${budget_usd:,.0f} against an estimated minimum of ${required_budget_usd:,.0f}.",
+            f"The ladder is split evenly around spot so it can keep re-arming both sides after fills.",
+            "Wider spacing here reduces churn and leaves more room for continuation when volatility expands.",
+        ]
+        return config, headline, rationale, highlights
+
     def _initial_bot_balances(
         self,
         strategy_type: StrategyType,
@@ -709,39 +884,7 @@ class TradingBotApp:
         snapshot: MarketSnapshot,
     ) -> dict[str, Any]:
         config = bot_row["config"]
-        if bot_row["strategy"] == StrategyType.GRID.value:
-            grid_config = self._grid_config_from_payload(config)
-            level_count = (
-                len(grid_config.price_levels())
-                if grid_config is not None
-                else int(config["grid_count"])
-            )
-            stop_loss_summary = (
-                f" • stop loss {config['stop_loss_pct']:.1f}%"
-                if config.get("stop_loss_enabled") and config.get("stop_loss_pct") is not None
-                else " • stop loss off"
-            )
-            upper_stop_summary = (
-                " • stop at upper on"
-                if config.get("stop_at_upper_enabled")
-                else " • stop at upper off"
-            )
-            config_summary = (
-                f"Range ${config['lower_price']:,.0f} to ${config['upper_price']:,.0f} "
-                f"across {level_count} levels{stop_loss_summary}{upper_stop_summary}"
-            )
-        elif bot_row["strategy"] == StrategyType.REBALANCE.value:
-            config_summary = (
-                f"Target BTC {config['target_btc_ratio'] * 100:.0f}% with "
-                f"{config['rebalance_threshold_pct']:.1f}% drift threshold"
-            )
-        else:
-            config_summary = (
-                f"Reference ${config.get('reference_price', config.get('lower_start_price', snapshot.price)):,.0f} • "
-                f"{int(config.get('levels_per_side', config.get('max_active_grids', 6)))} levels per side • "
-                f"${float(config.get('order_size_usd', 100.0)):,.0f} per order • "
-                f"{float(config['spacing_pct']):.1f}% spacing"
-            )
+        config_summary = self._config_summary(StrategyType(bot_row["strategy"]), config, snapshot)
         position_metrics = self._bot_position_metrics(bot_row, snapshot)
         return {
             **bot_row,
@@ -1340,6 +1483,58 @@ class TradingBotApp:
             self.process_bot_cycle(created_bot_id)
             self.process_manager.start_bot(created_bot_id)
         return self.dashboard(user_id=user_id, user_name=user_name)
+
+    def build_managed_bot_setup(
+        self,
+        strategy_type: StrategyType,
+        *,
+        budget_usd: float,
+        user_id: str = "demo-user",
+        user_name: str = "Demo Trader",
+    ) -> dict[str, Any]:
+        timestamp = self._timestamp()
+        snapshot = self.market_data.get_snapshot(self.settings.runtime.symbol)
+        account_state = self.paper_store.ensure_account(
+            user_id=user_id,
+            user_name=user_name,
+            timestamp=timestamp,
+        )
+        normalized_budget_usd = round(budget_usd, 2)
+        config, headline, rationale, highlights = self._build_managed_bot_setup(
+            strategy_type,
+            budget_usd=normalized_budget_usd,
+            snapshot=snapshot,
+        )
+        config_payload = asdict(config)
+        required_budget_usd, blocking_reason = self._minimum_budget_required(
+            strategy_type,
+            snapshot,
+            config,
+        )
+
+        return {
+            "generatedAt": timestamp,
+            "strategy": strategy_type.value,
+            "strategyLabel": self._strategy_label(strategy_type),
+            "budgetUsd": normalized_budget_usd,
+            "availableReserveUsd": round(self._reserve_total_usd(account_state, snapshot), 2),
+            "requiredBudgetUsd": required_budget_usd,
+            "fitsBudget": blocking_reason is None and normalized_budget_usd + 1e-9 >= required_budget_usd,
+            "marketSnapshot": {
+                "symbol": snapshot.symbol,
+                "price": round(snapshot.price, 2),
+                "change24hPct": round(snapshot.change_24h_pct, 2),
+                "volatility24hPct": round(snapshot.volatility_24h_pct, 2),
+                "trend": snapshot.trend,
+            },
+            "headline": headline,
+            "rationale": rationale,
+            "highlights": highlights,
+            "configSummary": self._config_summary(strategy_type, config_payload, snapshot),
+            "gridConfig": config_payload if strategy_type is StrategyType.GRID else None,
+            "rebalanceConfig": config_payload if strategy_type is StrategyType.REBALANCE else None,
+            "infinityConfig": config_payload if strategy_type is StrategyType.INFINITY_GRID else None,
+        }
 
     def start_bot(
         self, bot_id: str, user_id: str = "demo-user", user_name: str = "Demo Trader"

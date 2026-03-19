@@ -458,6 +458,35 @@ def test_create_bot_persists_active_strategy_and_trades(monkeypatch, tmp_path) -
     assert trade_count > active_bot["tradeCount"]
 
 
+def test_draft_bot_setup_returns_managed_parameters(monkeypatch, tmp_path) -> None:
+    client = build_client(monkeypatch, tmp_path)
+
+    response = client.post(
+        "/api/bots/draft",
+        json={
+            "strategy": "grid",
+            "budget_usd": 300,
+            "user_id": "user-123",
+            "user_name": "Test Trader",
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["strategy"] == "grid"
+    assert payload["strategyLabel"] == "Grid Bot"
+    assert payload["budgetUsd"] == 300.0
+    assert payload["requiredBudgetUsd"] > 0
+    assert payload["marketSnapshot"]["symbol"] == "BTC/USDT"
+    assert payload["headline"]
+    assert payload["rationale"]
+    assert len(payload["highlights"]) == 3
+    assert payload["gridConfig"]["lower_price"] < payload["marketSnapshot"]["price"]
+    assert payload["gridConfig"]["upper_price"] > payload["marketSnapshot"]["price"]
+    assert payload["gridConfig"]["grid_count"] >= 4
+    assert payload["configSummary"]
+
+
 def test_create_rebalance_bot_persists_custom_config(monkeypatch, tmp_path) -> None:
     client = build_client(monkeypatch, tmp_path)
 
