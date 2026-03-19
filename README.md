@@ -130,6 +130,38 @@ If `AUTH_SESSION_SECRET` is unset, the app falls back to a built-in development 
 
 Backtesting reads Binance monthly archive zip files from `TRADING_BOT_HISTORY_DIR`. In the ONCE image, that defaults to `/storage/binance/spot/monthly/klines`, so archive data survives redeploys when mounted under `/storage`.
 
+The paper-trading SQLite database is also persisted on ONCE. The app stores it under `TRADING_BOT_STATE_DIR`, which defaults to:
+
+```bash
+/storage/state/paper_trading.sqlite3
+```
+
+That means bots, balances, trades, chat history, and other paper-trading state survive redeploys as long as the app keeps using the ONCE-mounted `/storage` path.
+
+To populate that data on an ONCE deployment, run the packaged downloader inside the app container:
+
+```bash
+trading-bot download-history
+```
+
+By default, that downloads BTCUSDT 15m monthly Binance archives into:
+
+```bash
+/storage/binance/spot/monthly/klines/BTCUSDT/15m
+```
+
+If you already have archive ZIP files on the server, copy them into the same persistent path layout so the backtester can find them after redeploys:
+
+```bash
+/storage/binance/spot/monthly/klines/BTCUSDT/15m/*.zip
+```
+
+You can verify the mounted dataset with:
+
+```bash
+trading-bot history-summary --data-dir /storage/binance/spot/monthly/klines
+```
+
 ## Backend Commands
 
 Common CLI commands from `backend/` after installing dependencies:
@@ -139,6 +171,7 @@ trading-bot status
 trading-bot demo-strategy grid
 trading-bot demo-strategy rebalance
 trading-bot demo-strategy infinity-grid
+trading-bot download-history
 trading-bot history-summary --data-dir /path/to/binance-archives
 trading-bot run-backtest grid --data-dir /path/to/binance-archives
 trading-bot serve-api --reload

@@ -27,21 +27,18 @@ type SSEToolResultEvent = { tool: string; content: string }
 type SSEDoneEvent = { conversation_id: string }
 type SSEErrorEvent = { content: string }
 
-function getApiBaseUrl(): string {
-  return import.meta.env.VITE_API_BASE_URL ?? 'http://127.0.0.1:8000'
-}
+const AI_API_BASE_PATH = '/api/ai'
 
 async function fetchConversations(): Promise<ChatConversation[]> {
-  const res = await fetch(`${getApiBaseUrl()}/api/ai/conversations?user_id=demo-user`)
+  const res = await fetch(`${AI_API_BASE_PATH}/conversations`)
   if (!res.ok) return []
   const data = await res.json()
   return data.conversations ?? []
 }
 
 async function fetchMessages(conversationId: string): Promise<ChatMessage[]> {
-  const res = await fetch(
-    `${getApiBaseUrl()}/api/ai/history?conversation_id=${conversationId}`,
-  )
+  const params = new URLSearchParams({ conversation_id: conversationId })
+  const res = await fetch(`${AI_API_BASE_PATH}/history?${params.toString()}`)
   if (!res.ok) return []
   const data = await res.json()
   return (data.messages ?? [])
@@ -112,13 +109,12 @@ export function useAiChat() {
       abortRef.current = controller
 
       try {
-        const res = await fetch(`${getApiBaseUrl()}/api/ai/chat`, {
+        const res = await fetch(`${AI_API_BASE_PATH}/chat`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             message: text,
             conversation_id: conversationId,
-            user_id: 'demo-user',
           }),
           signal: controller.signal,
         })

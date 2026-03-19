@@ -242,7 +242,7 @@ export type BacktestInput = {
   infinityConfig?: InfinityGridBotInput
 }
 
-type SessionData = {
+export type SessionData = {
   user?: LineUserProfile
   oauthState?: string
   pkceVerifier?: string
@@ -269,7 +269,7 @@ function getSessionPassword() {
   )
 }
 
-function getSessionConfig() {
+export function getSessionConfig() {
   return {
     name: 'oscar-auth',
     password: getSessionPassword(),
@@ -358,7 +358,7 @@ type BackendConnectionEnvelope = {
   connection: MarketConnectionState
 }
 
-function getBackendApiBaseUrl() {
+export function getBackendApiBaseUrl() {
   return process.env.VITE_API_BASE_URL ?? 'http://127.0.0.1:8000'
 }
 
