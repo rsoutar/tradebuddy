@@ -58,6 +58,11 @@ class CreateBotRequest(UserScopedRequest):
     infinity_config: Optional[InfinityGridConfigRequest] = None
 
 
+class ManagedBotDraftRequest(UserScopedRequest):
+    strategy: StrategyType
+    budget_usd: float = Field(gt=0)
+
+
 class BacktestRequest(UserScopedRequest):
     strategy: StrategyType
     grid_config: Optional[GridConfigRequest] = None
@@ -174,6 +179,18 @@ def create_api(trading_app: Optional[TradingBotApp] = None) -> FastAPI:
                 infinity_config=(
                     payload.infinity_config.model_dump() if payload.infinity_config else None
                 ),
+            )
+        except ValueError as error:
+            raise HTTPException(status_code=400, detail=str(error)) from error
+
+    @api.post("/api/bots/draft")
+    def draft_bot_setup(payload: ManagedBotDraftRequest) -> dict:
+        try:
+            return app_state.build_managed_bot_setup(
+                payload.strategy,
+                budget_usd=payload.budget_usd,
+                user_id=payload.user_id,
+                user_name=payload.user_name,
             )
         except ValueError as error:
             raise HTTPException(status_code=400, detail=str(error)) from error
