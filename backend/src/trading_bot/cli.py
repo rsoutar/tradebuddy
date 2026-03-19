@@ -128,7 +128,7 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def main() -> None:
-    load_dotenv(Path(__file__).resolve().parents[3] / ".env", override=False)
+    load_dotenv(Path(__file__).resolve().parents[3] / ".env", override=True)
 
     parser = build_parser()
     args = parser.parse_args()

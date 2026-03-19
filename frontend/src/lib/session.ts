@@ -302,6 +302,12 @@ export type SRResult = {
   current_price: number
 }
 
+export type RecommendationCacheStatus = {
+  is_fresh: boolean
+  generated_at: string | null
+  is_llm_generated: boolean
+}
+
 export type StrategyComparisonResult = {
   market: MarketState
   support_resistance: SRResult | null
@@ -872,6 +878,19 @@ export const getStrategyComparison = createServerFn({ method: 'GET' }).handler(a
 export const getSupportResistance = createServerFn({ method: 'GET' }).handler(async () => {
   return fetchBackend<SRResult>(
     new URL('/api/support-resistance', getBackendApiBaseUrl()).toString(),
+  )
+})
+
+export const getRecommendationCacheStatus = createServerFn({ method: 'GET' }).handler(async () => {
+  return fetchBackend<RecommendationCacheStatus>(
+    new URL('/api/bots/recommendations/status', getBackendApiBaseUrl()).toString(),
+  )
+})
+
+export const invalidateRecommendationCache = createServerFn({ method: 'POST' }).handler(async () => {
+  return fetchBackend<{ ok: boolean; message: string }>(
+    new URL('/api/bots/recommendations', getBackendApiBaseUrl()).toString(),
+    { method: 'POST' },
   )
 })
 

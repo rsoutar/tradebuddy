@@ -487,6 +487,27 @@ def test_draft_bot_setup_returns_managed_parameters(monkeypatch, tmp_path) -> No
     assert payload["configSummary"]
 
 
+def test_recommendation_cache_status_endpoint(monkeypatch, tmp_path) -> None:
+    client = build_client(monkeypatch, tmp_path)
+
+    response = client.get("/api/bots/recommendations/status")
+    assert response.status_code == 200
+    payload = response.json()
+    assert "is_fresh" in payload
+    assert "generated_at" in payload
+    assert "is_llm_generated" in payload
+
+
+def test_recommendation_cache_invalidate_endpoint(monkeypatch, tmp_path) -> None:
+    client = build_client(monkeypatch, tmp_path)
+
+    response = client.post("/api/bots/recommendations")
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["ok"] is True
+    assert "invalidated" in payload["message"]
+
+
 def test_create_rebalance_bot_persists_custom_config(monkeypatch, tmp_path) -> None:
     client = build_client(monkeypatch, tmp_path)
 
