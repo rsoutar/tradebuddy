@@ -693,6 +693,57 @@ function strategyTone(strategy: StrategyKey) {
   }
 }
 
+function createModalTone(strategy: StrategyKey) {
+  if (strategy === 'grid') {
+    return {
+      dot: 'bg-emerald-400',
+      accentText: 'text-emerald-300',
+      activeCard:
+        'border-emerald-400/30 bg-[radial-gradient(circle_at_top_left,_rgba(16,185,129,0.16),_transparent_60%),rgba(6,78,59,0.12)] shadow-[0_0_0_1px_rgba(16,185,129,0.14)]',
+      iconSurface: 'border-emerald-400/20 bg-emerald-400/10 text-emerald-300',
+      toggleTrack: 'bg-emerald-500',
+      helperCard: 'border-emerald-500/20 bg-emerald-500/10 text-emerald-100',
+      aiCard: 'border-emerald-500/20 bg-[radial-gradient(circle_at_top_left,_rgba(16,185,129,0.16),_transparent_58%)]',
+      aiAccent: 'text-emerald-300/90',
+      aiIcon: 'text-emerald-300',
+      statTint: 'text-emerald-300',
+      quickBudgetActive: 'border-emerald-400 bg-emerald-400 text-zinc-950',
+    }
+  }
+
+  if (strategy === 'rebalance') {
+    return {
+      dot: 'bg-amber-300',
+      accentText: 'text-amber-300',
+      activeCard:
+        'border-amber-300/30 bg-[radial-gradient(circle_at_top_left,_rgba(245,158,11,0.15),_transparent_60%),rgba(120,53,15,0.12)] shadow-[0_0_0_1px_rgba(245,158,11,0.14)]',
+      iconSurface: 'border-amber-300/20 bg-amber-300/10 text-amber-200',
+      toggleTrack: 'bg-amber-300',
+      helperCard: 'border-amber-300/20 bg-amber-300/10 text-amber-100',
+      aiCard: 'border-amber-300/20 bg-[radial-gradient(circle_at_top_left,_rgba(245,158,11,0.15),_transparent_58%)]',
+      aiAccent: 'text-amber-200/90',
+      aiIcon: 'text-amber-200',
+      statTint: 'text-amber-200',
+      quickBudgetActive: 'border-amber-300 bg-amber-300 text-zinc-950',
+    }
+  }
+
+  return {
+    dot: 'bg-sky-300',
+    accentText: 'text-sky-300',
+    activeCard:
+      'border-sky-300/30 bg-[radial-gradient(circle_at_top_left,_rgba(56,189,248,0.16),_transparent_60%),rgba(12,74,110,0.12)] shadow-[0_0_0_1px_rgba(56,189,248,0.14)]',
+    iconSurface: 'border-sky-300/20 bg-sky-300/10 text-sky-200',
+    toggleTrack: 'bg-sky-300',
+    helperCard: 'border-sky-300/20 bg-sky-300/10 text-sky-100',
+    aiCard: 'border-sky-300/20 bg-[radial-gradient(circle_at_top_left,_rgba(56,189,248,0.16),_transparent_58%)]',
+    aiAccent: 'text-sky-200/90',
+    aiIcon: 'text-sky-200',
+    statTint: 'text-sky-200',
+    quickBudgetActive: 'border-sky-300 bg-sky-300 text-zinc-950',
+  }
+}
+
 function MetricCard({
   label,
   labelAction,
@@ -1028,6 +1079,7 @@ function DashboardPage() {
   }, [infinityLevelsPerSide, infinityReferencePrice, infinitySpacingPct, market.price])
   const parsedBudgetUsd = useMemo(() => parsePositiveNumber(botBudgetUsd), [botBudgetUsd])
   const selectedCreateMeta = strategyCreateMeta[selectedBotType]
+  const selectedCreateTone = createModalTone(selectedBotType)
   const aiDraftMetrics = useMemo(() => buildAiDraftMetrics(aiDraft), [aiDraft])
   const budgetPresets = useMemo(() => {
     const reservePreset = Math.floor(dashboard.availableReserveUsd)
@@ -1720,51 +1772,51 @@ function DashboardPage() {
       </ProtectedShell>
 
       {isCreateBotModalOpen ? (
-        <div className="fixed inset-0 z-40 overflow-y-auto bg-black/70 px-4 py-4 backdrop-blur-sm">
+        <div className="fixed inset-0 z-40 overflow-y-auto bg-black/72 px-4 py-4 backdrop-blur-sm sm:px-6 sm:py-6">
           <button
             aria-label="Close new bot modal"
             className="absolute inset-0"
             type="button"
             onClick={closeCreateBotModal}
           />
-          <div className="relative z-10 mx-auto my-4 max-h-[calc(100vh-2rem)] w-full max-w-6xl overflow-y-auto rounded-[2rem] border border-zinc-800/90 bg-zinc-950 shadow-2xl shadow-black/60">
-            <div className="grid gap-0 lg:grid-cols-[0.95fr_1.05fr]">
-              <div className="border-b border-zinc-800/80 bg-[radial-gradient(circle_at_top_left,_rgba(255,255,255,0.06),_transparent_55%)] p-6 lg:border-b-0 lg:border-r lg:p-7">
-                <div className="flex items-start justify-between gap-4">
+          <div className="relative z-10 mx-auto my-4 w-full max-w-7xl overflow-hidden rounded-[2rem] border border-zinc-800/90 bg-[#0a0a0a] shadow-2xl shadow-black/60">
+            <button
+              aria-label="Close new bot modal"
+              className="absolute right-4 top-4 z-20 rounded-full border border-zinc-800 bg-zinc-950/90 p-2 text-zinc-400 transition hover:border-zinc-700 hover:bg-zinc-900 hover:text-zinc-100 lg:right-[calc(55%+1.25rem)] lg:top-5"
+              type="button"
+              onClick={closeCreateBotModal}
+            >
+              <Icon icon="solar:close-circle-linear" width={22} height={22} />
+            </button>
+
+            <div className="grid gap-0 lg:grid-cols-[0.92fr_1.08fr]">
+              <div className="flex flex-col gap-8 border-b border-zinc-800/80 bg-[radial-gradient(circle_at_top_left,_rgba(255,255,255,0.04),_transparent_58%)] p-6 lg:min-h-[860px] lg:border-b-0 lg:border-r lg:p-8">
+                <div className="pr-14">
                   <div>
                     <p className="text-xs font-medium uppercase tracking-[0.3em] text-zinc-500">
                       Strategy Launcher
                     </p>
-                    <h2 className="mt-2 text-3xl font-medium tracking-tight text-zinc-100">
+                    <h2 className="mt-3 text-3xl font-medium tracking-tight text-zinc-100 sm:text-[2.1rem]">
                       Let the model handle the setup
                     </h2>
-                    <p className="mt-3 max-w-xl text-sm leading-6 text-zinc-400">
+                    <p className="mt-4 max-w-xl text-base leading-7 text-zinc-400">
                       Pick the bot archetype, enter the budget, and AI Pilot will draft a
                       market-aware launch plan you can still fine-tune manually before you
                       initialize it.
                     </p>
                   </div>
-                  <button
-                    aria-label="Close new bot modal"
-                    className="rounded-full border border-zinc-800 bg-zinc-900/80 p-2 text-zinc-400 transition hover:border-zinc-700 hover:text-zinc-100"
-                    type="button"
-                    onClick={closeCreateBotModal}
-                  >
-                    <Icon icon="solar:close-circle-linear" width={22} height={22} />
-                  </button>
                 </div>
 
-                <div className="mt-6 grid gap-4">
+                <div className="grid gap-4">
                   {botCatalog.map((bot) => {
                     const isSelected = bot.key === selectedBotType
                     return (
                       <button
                         className={cx(
-                          'rounded-[1.5rem] border px-5 py-5 text-left transition',
-                          bot.accent,
+                          'group relative overflow-hidden rounded-[1.35rem] border px-5 py-5 text-left transition sm:px-6 sm:py-6',
                           isSelected
-                            ? 'border-zinc-100/20 shadow-[0_0_0_1px_rgba(244,244,245,0.12)]'
-                            : 'border-zinc-800 hover:border-zinc-700',
+                            ? selectedCreateTone.activeCard
+                            : 'border-zinc-800/80 bg-zinc-900/35 hover:border-zinc-700 hover:bg-zinc-900/60',
                         )}
                         key={bot.key}
                         type="button"
@@ -1775,255 +1827,230 @@ function DashboardPage() {
                           setSelectedBotType(bot.key)
                         }}
                       >
+                        {isSelected ? (
+                          <div className="absolute inset-0 bg-gradient-to-br from-white/[0.03] via-transparent to-transparent" />
+                        ) : null}
                         <div className="flex items-start justify-between gap-4">
                           <div>
-                            <p className="text-[11px] font-semibold uppercase tracking-[0.28em] text-zinc-500">
+                            <p
+                              className={cx(
+                                'text-[11px] font-semibold uppercase tracking-[0.28em]',
+                                isSelected ? selectedCreateTone.accentText : 'text-zinc-500 group-hover:text-zinc-400',
+                              )}
+                            >
                               {bot.eyebrow}
                             </p>
-                            <h3 className="mt-2 text-xl font-medium text-zinc-100">
+                            <h3 className="mt-2 text-xl font-medium text-zinc-100 sm:text-[1.35rem]">
                               {strategyLabels[bot.key]}
                             </h3>
                           </div>
-                          <div className="flex h-11 w-11 items-center justify-center rounded-2xl border border-white/10 bg-zinc-950/70 text-zinc-100">
+                          <div
+                            className={cx(
+                              'flex h-11 w-11 items-center justify-center rounded-2xl border bg-zinc-950/70',
+                              isSelected
+                                ? selectedCreateTone.iconSurface
+                                : 'border-zinc-800 text-zinc-400 group-hover:border-zinc-700 group-hover:text-zinc-200',
+                            )}
+                          >
                             <Icon icon={bot.icon} width={20} height={20} />
                           </div>
                         </div>
-                        <p className="mt-3 text-sm leading-6 text-zinc-400">{bot.description}</p>
+                        <p className="relative mt-3 text-sm leading-6 text-zinc-400 group-hover:text-zinc-300">
+                          {bot.description}
+                        </p>
                       </button>
                     )
                   })}
                 </div>
 
-                <div className="mt-6 grid gap-3 sm:grid-cols-2">
-                  <div className="rounded-2xl border border-zinc-800/80 bg-zinc-900/60 px-4 py-4">
+                <div className="mt-auto grid gap-3 sm:grid-cols-2">
+                  <div className="rounded-[1.35rem] border border-zinc-800/80 bg-zinc-900/45 px-5 py-5">
                     <p className="text-xs uppercase tracking-[0.22em] text-zinc-500">Spot now</p>
-                    <p className="mt-2 text-2xl font-semibold tracking-tight text-zinc-100">
+                    <p className="mt-3 text-3xl font-semibold tracking-tight text-zinc-100">
                       {formatCurrency(market.price)}
                     </p>
                     <p
                       className={cx(
-                        'mt-2 text-xs font-medium',
+                        'mt-2 text-sm font-medium',
                         market.change_24h_pct >= 0 ? 'text-emerald-300' : 'text-rose-300',
                       )}
                     >
                       {formatPercent(market.change_24h_pct)}
                     </p>
                   </div>
-                  <div className="rounded-2xl border border-zinc-800/80 bg-zinc-900/60 px-4 py-4">
+                  <div className="rounded-[1.35rem] border border-zinc-800/80 bg-zinc-900/45 px-5 py-5">
                     <p className="text-xs uppercase tracking-[0.22em] text-zinc-500">Market regime</p>
-                    <p className="mt-2 text-lg font-medium text-zinc-100">{market.trend}</p>
-                    <p className="mt-2 text-xs text-zinc-500">
+                    <p className="mt-3 text-xl font-medium capitalize text-zinc-100">{market.trend}</p>
+                    <p className="mt-2 text-sm text-zinc-500">
                       24h volatility {market.volatility_24h_pct.toFixed(1)}%
                     </p>
                   </div>
                 </div>
-
-                <div className="mt-6 rounded-[1.5rem] border border-zinc-800/80 bg-zinc-900/60 p-5">
-                  <p className="text-xs font-medium uppercase tracking-[0.28em] text-zinc-500">
-                    Launch flow
-                  </p>
-                  <div className="mt-4 space-y-3 text-sm text-zinc-400">
-                    <div className="flex items-start gap-3">
-                      <span
-                        className={cx(
-                          'mt-0.5 h-2.5 w-2.5 rounded-full',
-                          selectedBotType === 'grid'
-                            ? 'bg-emerald-300'
-                            : selectedBotType === 'rebalance'
-                              ? 'bg-amber-300'
-                              : 'bg-sky-300',
-                        )}
-                      />
-                      <span>Enter the budget you want this bot to reserve.</span>
-                    </div>
-                    <div className="flex items-start gap-3">
-                      <span
-                        className={cx(
-                          'mt-0.5 h-2.5 w-2.5 rounded-full',
-                          selectedBotType === 'grid'
-                            ? 'bg-emerald-300'
-                            : selectedBotType === 'rebalance'
-                              ? 'bg-amber-300'
-                              : 'bg-sky-300',
-                        )}
-                      />
-                      <span>Keep AI Pilot on for an auto-managed setup, or switch it off to edit manually.</span>
-                    </div>
-                    <div className="flex items-start gap-3">
-                      <span
-                        className={cx(
-                          'mt-0.5 h-2.5 w-2.5 rounded-full',
-                          selectedBotType === 'grid'
-                            ? 'bg-emerald-300'
-                            : selectedBotType === 'rebalance'
-                              ? 'bg-amber-300'
-                              : 'bg-sky-300',
-                        )}
-                      />
-                      <span>The launch still posts through the same backend bot-create flow and records paper orders immediately.</span>
-                    </div>
-                  </div>
-                </div>
               </div>
 
-              <div className="p-6 lg:p-7">
-                <form className="space-y-5" onSubmit={handleCreateBotSubmit}>
-                  <div className={cx('rounded-[1.75rem] border p-5', selectedCreateMeta.aiRing, selectedCreateMeta.aiGlow)}>
-                    <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
-                      <div>
-                        <p className="text-xs font-medium uppercase tracking-[0.28em] text-zinc-500">
-                          Initialize Bot
-                        </p>
-                        <h3 className="mt-2 text-2xl font-medium tracking-tight text-zinc-100">
-                          {strategyLabels[selectedBotType]}
-                        </h3>
-                        <p className="mt-2 max-w-xl text-sm leading-6 text-zinc-400">
-                          {isAiPilotEnabled
-                            ? selectedCreateMeta.aiDescription
-                            : selectedCreateMeta.manualDescription}
-                        </p>
-                      </div>
-                      <div className="rounded-full border border-white/10 bg-zinc-950/80 px-3 py-2">
-                        <div className="flex items-center gap-3">
-                          <span className="text-xs text-zinc-400">AI Pilot</span>
-                          <button
-                            aria-checked={isAiPilotEnabled}
-                            aria-label="Toggle AI Pilot"
+              <div className="bg-[#0c0c0c] p-6 lg:p-8">
+                <form className="flex h-full flex-col gap-6" onSubmit={handleCreateBotSubmit}>
+                  <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+                    <div className="max-w-2xl">
+                      <p className={cx('text-xs font-medium uppercase tracking-[0.28em]', selectedCreateTone.accentText)}>
+                        Initialize Bot
+                      </p>
+                      <h3 className="mt-3 text-3xl font-medium tracking-tight text-zinc-100">
+                        {strategyLabels[selectedBotType]}
+                      </h3>
+                      <p className="mt-3 text-base leading-7 text-zinc-400">
+                        {isAiPilotEnabled
+                          ? selectedCreateMeta.aiDescription
+                          : selectedCreateMeta.manualDescription}
+                      </p>
+                    </div>
+                    <div className="shrink-0 rounded-full border border-zinc-800 bg-zinc-900/80 px-4 py-2 shadow-sm">
+                      <div className="flex items-center gap-3">
+                        <span className="text-sm font-medium text-zinc-300">AI Pilot</span>
+                        <button
+                          aria-checked={isAiPilotEnabled}
+                          aria-label="Toggle AI Pilot"
+                          className={cx(
+                            'relative inline-flex h-6 w-11 rounded-full transition-colors focus:outline-none',
+                            isAiPilotEnabled ? selectedCreateTone.toggleTrack : 'bg-zinc-800',
+                          )}
+                          role="switch"
+                          type="button"
+                          onClick={() => {
+                            setCreateBotError(undefined)
+                            setAiDraftError(undefined)
+                            setIsAiPilotEnabled((current) => !current)
+                          }}
+                        >
+                          <span
                             className={cx(
-                              'relative inline-flex h-6 w-11 rounded-full transition-colors',
-                              isAiPilotEnabled ? 'bg-indigo-500' : 'bg-zinc-800',
+                              'absolute top-0.5 h-5 w-5 rounded-full bg-white transition-all',
+                              isAiPilotEnabled ? 'left-[22px]' : 'left-0.5',
                             )}
-                            role="switch"
+                          />
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="grid gap-6 xl:grid-cols-[1.05fr_0.95fr]">
+                    <div className="flex flex-col gap-4">
+                      <label className="block">
+                        <span className="mb-3 block text-sm font-medium text-zinc-300">Investment (USD)</span>
+                        <div className="relative">
+                          <span className="pointer-events-none absolute left-4 top-1/2 -translate-y-1/2 text-zinc-500">
+                            $
+                          </span>
+                          <input
+                            className={cx(
+                              'w-full rounded-[1.15rem] border border-zinc-800 bg-[#111] py-3 pl-9 pr-4 text-lg font-medium text-zinc-100 outline-none transition placeholder:text-zinc-600',
+                              selectedCreateMeta.inputFocus,
+                            )}
+                            inputMode="decimal"
+                            min="0.01"
+                            step="0.01"
+                            placeholder={dashboard.availableReserveUsd.toFixed(2)}
+                            type="number"
+                            value={botBudgetUsd}
+                            onChange={(event) => setBotBudgetUsd(event.target.value)}
+                          />
+                        </div>
+                      </label>
+
+                      <div className="flex flex-wrap gap-2">
+                        {budgetPresets.map((amount) => (
+                          <button
+                            className={cx(
+                              'rounded-xl border px-3 py-1.5 text-sm font-medium transition',
+                              Number(botBudgetUsd) === amount
+                                ? selectedCreateTone.quickBudgetActive
+                                : 'border-zinc-800 bg-zinc-900/50 text-zinc-400 hover:border-zinc-700 hover:bg-zinc-800 hover:text-zinc-100',
+                            )}
+                            key={amount}
                             type="button"
-                            onClick={() => {
-                              setCreateBotError(undefined)
-                              setAiDraftError(undefined)
-                              setIsAiPilotEnabled((current) => !current)
-                            }}
+                            onClick={() => setBotBudgetUsd(String(amount))}
                           >
-                            <span
-                              className={cx(
-                                'absolute top-0.5 h-5 w-5 rounded-full bg-white transition-all',
-                                isAiPilotEnabled ? 'left-[22px]' : 'left-0.5',
-                              )}
-                            />
+                            {amount === Math.floor(dashboard.availableReserveUsd)
+                              ? 'Max reserve'
+                              : formatCurrency(amount)}
                           </button>
-                        </div>
+                        ))}
                       </div>
+
+                      <p className="text-sm text-zinc-500">
+                        Available reserve: <span className="text-zinc-300">{formatCurrency(dashboard.availableReserveUsd)}</span>
+                      </p>
                     </div>
 
-                    <div className="mt-5 grid gap-4 xl:grid-cols-[1fr_0.95fr]">
-                      <div>
-                        <label className="block">
-                          <span className="mb-2 block text-sm font-medium text-zinc-300">Investment (USD)</span>
-                          <div className="relative">
-                            <span className="pointer-events-none absolute left-4 top-1/2 -translate-y-1/2 text-zinc-500">
-                              $
-                            </span>
-                            <input
-                              className={cx(
-                                'w-full rounded-2xl border border-zinc-800 bg-zinc-950/80 py-3 pl-9 pr-4 text-lg text-zinc-100 outline-none transition placeholder:text-zinc-600',
-                                selectedCreateMeta.inputFocus,
-                              )}
-                              inputMode="decimal"
-                              min="0.01"
-                              step="0.01"
-                              placeholder={dashboard.availableReserveUsd.toFixed(2)}
-                              type="number"
-                              value={botBudgetUsd}
-                              onChange={(event) => setBotBudgetUsd(event.target.value)}
-                            />
-                          </div>
-                        </label>
-                        <div className="mt-3 flex flex-wrap gap-2">
-                          {budgetPresets.map((amount) => (
-                            <button
-                              className={cx(
-                                'rounded-full border px-3 py-1.5 text-xs transition',
-                                Number(botBudgetUsd) === amount
-                                  ? 'border-zinc-100 bg-zinc-100 text-zinc-950'
-                                  : 'border-zinc-800 bg-zinc-900/60 text-zinc-400 hover:border-zinc-700 hover:text-zinc-200',
-                              )}
-                              key={amount}
-                              type="button"
-                              onClick={() => setBotBudgetUsd(String(amount))}
-                            >
-                              {amount === Math.floor(dashboard.availableReserveUsd) ? 'Max reserve' : formatCurrency(amount)}
-                            </button>
-                          ))}
-                        </div>
-                        <p className="mt-3 text-xs text-zinc-500">
-                          Available reserve: {formatCurrency(dashboard.availableReserveUsd)}
+                    <div
+                      className={cx(
+                        'rounded-[1.35rem] border px-5 py-5 text-sm leading-6',
+                        botBudgetAssessment.tone === 'positive'
+                          ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-100'
+                          : botBudgetAssessment.tone === 'negative'
+                            ? 'border-rose-500/30 bg-rose-500/10 text-rose-200'
+                            : 'border-zinc-800 bg-zinc-900/50 text-zinc-400',
+                      )}
+                    >
+                      <p className="text-xs font-medium uppercase tracking-[0.24em] opacity-80">
+                        Budget Check
+                      </p>
+                      <p className="mt-3">
+                        {botBudgetAssessment.message}
+                      </p>
+                      {botBudgetAssessment.requiredBudgetUsd ? (
+                        <p className="mt-3 text-xs opacity-80">
+                          Minimum realistic budget: {formatCurrency(botBudgetAssessment.requiredBudgetUsd)}
                         </p>
-                      </div>
-
-                      <div
-                        className={cx(
-                          'rounded-[1.5rem] border px-4 py-4 text-sm leading-6',
-                          botBudgetAssessment.tone === 'positive'
-                            ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-100'
-                            : botBudgetAssessment.tone === 'negative'
-                              ? 'border-rose-500/30 bg-rose-500/10 text-rose-200'
-                              : 'border-zinc-800 bg-zinc-900/60 text-zinc-400',
-                        )}
-                      >
-                        <p className="text-xs font-medium uppercase tracking-[0.24em] opacity-80">
-                          Budget check
-                        </p>
-                        <p className="mt-2">{botBudgetAssessment.message}</p>
-                        {botBudgetAssessment.requiredBudgetUsd ? (
-                          <p className="mt-2 text-xs opacity-80">
-                            Minimum realistic budget: {formatCurrency(botBudgetAssessment.requiredBudgetUsd)}
-                          </p>
-                        ) : null}
-                      </div>
+                      ) : null}
                     </div>
+                  </div>
 
-                    <div className="mt-5 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-                      <div className="rounded-2xl border border-zinc-800/70 bg-zinc-950/60 px-4 py-3">
-                        <p className="text-[11px] uppercase tracking-[0.2em] text-zinc-500">Pair</p>
-                        <p className="mt-2 text-sm font-medium text-zinc-100">BTC/USDT</p>
-                      </div>
-                      <div className="rounded-2xl border border-zinc-800/70 bg-zinc-950/60 px-4 py-3">
-                        <p className="text-[11px] uppercase tracking-[0.2em] text-zinc-500">24h change</p>
-                        <p className={cx('mt-2 text-sm font-medium', market.change_24h_pct >= 0 ? 'text-emerald-300' : 'text-rose-300')}>
-                          {formatPercent(market.change_24h_pct)}
-                        </p>
-                      </div>
-                      <div className="rounded-2xl border border-zinc-800/70 bg-zinc-950/60 px-4 py-3">
-                        <p className="text-[11px] uppercase tracking-[0.2em] text-zinc-500">Volatility</p>
-                        <p className="mt-2 text-sm font-medium text-zinc-100">
-                          {market.volatility_24h_pct.toFixed(1)}%
-                        </p>
-                      </div>
-                      <div className="rounded-2xl border border-zinc-800/70 bg-zinc-950/60 px-4 py-3">
-                        <p className="text-[11px] uppercase tracking-[0.2em] text-zinc-500">Trend</p>
-                        <p className="mt-2 truncate text-sm font-medium text-zinc-100">{market.trend}</p>
-                      </div>
+                  <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+                    <div className="rounded-[1.15rem] border border-zinc-800/80 bg-[#111] px-4 py-4">
+                      <p className="text-[11px] uppercase tracking-[0.22em] text-zinc-500">Pair</p>
+                      <p className="mt-2 text-base font-medium text-zinc-100">BTC/USDT</p>
+                    </div>
+                    <div className="rounded-[1.15rem] border border-zinc-800/80 bg-[#111] px-4 py-4">
+                      <p className="text-[11px] uppercase tracking-[0.22em] text-zinc-500">24h Change</p>
+                      <p className={cx('mt-2 text-base font-medium', market.change_24h_pct >= 0 ? 'text-emerald-300' : 'text-rose-300')}>
+                        {formatPercent(market.change_24h_pct)}
+                      </p>
+                    </div>
+                    <div className="rounded-[1.15rem] border border-zinc-800/80 bg-[#111] px-4 py-4">
+                      <p className="text-[11px] uppercase tracking-[0.22em] text-zinc-500">Volatility</p>
+                      <p className="mt-2 text-base font-medium text-zinc-100">
+                        {market.volatility_24h_pct.toFixed(1)}%
+                      </p>
+                    </div>
+                    <div className="rounded-[1.15rem] border border-zinc-800/80 bg-[#111] px-4 py-4">
+                      <p className="text-[11px] uppercase tracking-[0.22em] text-zinc-500">Trend</p>
+                      <p className="mt-2 truncate text-base font-medium capitalize text-zinc-100">{market.trend}</p>
                     </div>
                   </div>
 
                   {isAiPilotEnabled ? (
-                    <div className="space-y-5">
-                      <div className="rounded-[1.75rem] border border-indigo-500/20 bg-[radial-gradient(circle_at_top_left,_rgba(99,102,241,0.18),_transparent_55%)] p-5">
+                    <div className="flex flex-col gap-5">
+                      <div className={cx('relative overflow-hidden rounded-[1.5rem] border p-5 sm:p-6', selectedCreateTone.aiCard)}>
+                        <div className="absolute left-0 right-0 top-0 h-px bg-gradient-to-r from-white/0 via-white/30 to-white/0" />
                         <div className="flex items-start justify-between gap-4">
                           <div>
-                            <p className="text-xs font-medium uppercase tracking-[0.28em] text-indigo-300/80">
+                            <p className={cx('text-xs font-medium uppercase tracking-[0.28em]', selectedCreateTone.aiAccent)}>
                               AI Pilot
                             </p>
-                            <h4 className="mt-2 text-xl font-medium tracking-tight text-zinc-100">
+                            <h4 className="mt-3 text-xl font-medium tracking-tight text-zinc-100 sm:text-2xl">
                               {parsedBudgetUsd
                                 ? aiDraft?.headline ?? 'Preparing the managed setup...'
                                 : 'Enter a budget and AI Pilot will draft the setup.'}
                             </h4>
-                            <p className="mt-2 max-w-2xl text-sm leading-6 text-zinc-400">
+                            <p className="mt-3 max-w-2xl text-sm leading-6 text-zinc-400">
                               {parsedBudgetUsd
                                 ? aiDraft?.rationale
                                   ?? 'The model is reading the current BTC regime and filling in the launch parameters.'
                                 : 'This mode uses the analyst engine to adapt the launch parameters to the current BTC market before you initialize the bot.'}
                             </p>
                           </div>
-                          <div className="flex h-10 w-10 items-center justify-center rounded-2xl border border-white/10 bg-zinc-950/70 text-indigo-300">
+                          <div className={cx('flex h-10 w-10 items-center justify-center rounded-full border border-white/10 bg-zinc-950/70', selectedCreateTone.aiIcon)}>
                             {isAiDraftLoading ? (
                               <Icon icon="solar:refresh-line-duotone" width={18} height={18} className="animate-spin" />
                             ) : (
@@ -2047,7 +2074,7 @@ function DashboardPage() {
                             <div className="mt-5 grid gap-3 sm:grid-cols-2">
                               {aiDraftMetrics.map((item) => (
                                 <div
-                                  className="rounded-2xl border border-zinc-800/70 bg-zinc-950/60 px-4 py-3"
+                                  className="rounded-[1rem] border border-zinc-800/70 bg-zinc-950/60 px-4 py-3"
                                   key={item.label}
                                 >
                                   <p className="text-[11px] uppercase tracking-[0.2em] text-zinc-500">
@@ -2057,7 +2084,7 @@ function DashboardPage() {
                                 </div>
                               ))}
                             </div>
-                            <div className="mt-5 rounded-2xl border border-zinc-800/70 bg-zinc-950/50 px-4 py-3 text-sm text-zinc-400">
+                            <div className="mt-5 rounded-[1rem] border border-zinc-800/70 bg-zinc-950/50 px-4 py-3 text-sm text-zinc-400">
                               <p className="font-medium text-zinc-100">Generated configuration</p>
                               <p className="mt-2 leading-6">{aiDraft.configSummary}</p>
                               <p className="mt-2 text-xs text-zinc-500">
@@ -2072,170 +2099,168 @@ function DashboardPage() {
                       {selectedBotType === 'infinity-grid' ? <LadderPreview model={infinityPreview} /> : null}
                     </div>
                   ) : (
-                    <div className="space-y-5">
-                      <div>
-                        <p className={cx('text-xs font-medium uppercase tracking-[0.28em]', selectedCreateMeta.accentText)}>
-                          {selectedCreateMeta.sectionEyebrow}
-                        </p>
-                        <h4 className="mt-2 text-2xl font-medium tracking-tight text-zinc-100">
-                          {selectedCreateMeta.sectionTitle}
-                        </h4>
-                        <p className="mt-2 max-w-2xl text-sm leading-6 text-zinc-400">
-                          {selectedCreateMeta.manualDescription}
-                        </p>
-                      </div>
+                    <div className="flex flex-col gap-5">
+                      <div className="rounded-[1.5rem] border border-zinc-800/80 bg-zinc-900/30 p-5 sm:p-6">
+                        <div>
+                          <p className={cx('text-xs font-medium uppercase tracking-[0.28em]', selectedCreateMeta.accentText)}>
+                            {selectedCreateMeta.sectionEyebrow}
+                          </p>
+                          <h4 className="mt-3 text-2xl font-medium tracking-tight text-zinc-100">
+                            {selectedCreateMeta.sectionTitle}
+                          </h4>
+                          <p className="mt-3 max-w-2xl text-sm leading-6 text-zinc-400">
+                            {selectedCreateMeta.manualDescription}
+                          </p>
+                        </div>
 
-                      {selectedBotType === 'grid' ? (
-                        <>
-                          <div className="grid gap-4 sm:grid-cols-2">
-                            <label className="block">
-                              <span className="mb-2 block text-sm font-medium text-zinc-300">Lower price</span>
-                              <input
-                                className={cx('w-full rounded-2xl border border-zinc-800 bg-zinc-900/80 px-4 py-3 text-zinc-100 outline-none transition placeholder:text-zinc-600', selectedCreateMeta.inputFocus)}
-                                inputMode="decimal"
-                                min="0.01"
-                                step="0.01"
-                                type="number"
-                                value={gridLowerPrice}
-                                onChange={(event) => setGridLowerPrice(event.target.value)}
-                              />
-                            </label>
-                            <label className="block">
-                              <span className="mb-2 block text-sm font-medium text-zinc-300">Upper price</span>
-                              <input
-                                className={cx('w-full rounded-2xl border border-zinc-800 bg-zinc-900/80 px-4 py-3 text-zinc-100 outline-none transition placeholder:text-zinc-600', selectedCreateMeta.inputFocus)}
-                                inputMode="decimal"
-                                min="0.01"
-                                step="0.01"
-                                type="number"
-                                value={gridUpperPrice}
-                                onChange={(event) => setGridUpperPrice(event.target.value)}
-                              />
-                            </label>
-                            <label className="block">
-                              <span className="mb-2 block text-sm font-medium text-zinc-300">Grid levels</span>
-                              <input
-                                className={cx('w-full rounded-2xl border border-zinc-800 bg-zinc-900/80 px-4 py-3 text-zinc-100 outline-none transition placeholder:text-zinc-600', selectedCreateMeta.inputFocus)}
-                                inputMode="numeric"
-                                min="2"
-                                step="1"
-                                type="number"
-                                value={gridCount}
-                                onChange={(event) => setGridCount(event.target.value)}
-                              />
-                            </label>
-                            <label className="block">
-                              <span className="mb-2 block text-sm font-medium text-zinc-300">Spacing (%)</span>
-                              <input
-                                className={cx('w-full rounded-2xl border border-zinc-800 bg-zinc-900/80 px-4 py-3 text-zinc-100 outline-none transition placeholder:text-zinc-600', selectedCreateMeta.inputFocus)}
-                                inputMode="decimal"
-                                min="0.1"
-                                step="0.1"
-                                type="number"
-                                value={gridSpacing}
-                                onChange={(event) => setGridSpacing(event.target.value)}
-                              />
-                            </label>
-                          </div>
-
-                          <div className="rounded-[1.5rem] border border-zinc-800 bg-zinc-900/50 p-4">
-                            <div className="flex items-center justify-between gap-4">
-                              <div>
-                                <p className="text-sm font-medium text-zinc-200">Stop loss</p>
-                                <p className="mt-1 text-xs leading-5 text-zinc-500">
-                                  Enable this only if you want the bot to warn when price breaks below your safety threshold.
-                                </p>
-                              </div>
-                              <button
-                                aria-checked={isGridStopLossEnabled}
-                                aria-label="Toggle stop loss"
-                                className={cx(
-                                  'relative inline-flex h-7 w-12 rounded-full transition-colors',
-                                  isGridStopLossEnabled ? 'bg-emerald-400' : 'bg-zinc-800',
-                                )}
-                                role="switch"
-                                type="button"
-                                onClick={() => setIsGridStopLossEnabled((current) => !current)}
-                              >
-                                <span
-                                  className={cx(
-                                    'absolute top-1 h-5 w-5 rounded-full transition-all',
-                                    isGridStopLossEnabled ? 'left-6 bg-zinc-950' : 'left-1 bg-zinc-500',
-                                  )}
-                                />
-                              </button>
-                            </div>
-                            {isGridStopLossEnabled ? (
-                              <label className="mt-4 block">
-                                <span className="mb-2 block text-sm font-medium text-zinc-300">Stop loss (%)</span>
+                        {selectedBotType === 'grid' ? (
+                          <>
+                            <div className="mt-5 grid gap-4 sm:grid-cols-2">
+                              <label className="block">
+                                <span className="mb-2 block text-sm font-medium text-zinc-300">Lower price</span>
                                 <input
-                                  className={cx('w-full rounded-2xl border border-zinc-800 bg-zinc-900/80 px-4 py-3 text-zinc-100 outline-none transition placeholder:text-zinc-600', selectedCreateMeta.inputFocus)}
+                                  className={cx('w-full rounded-[1rem] border border-zinc-800 bg-zinc-900/80 px-4 py-3 text-zinc-100 outline-none transition placeholder:text-zinc-600', selectedCreateMeta.inputFocus)}
+                                  inputMode="decimal"
+                                  min="0.01"
+                                  step="0.01"
+                                  type="number"
+                                  value={gridLowerPrice}
+                                  onChange={(event) => setGridLowerPrice(event.target.value)}
+                                />
+                              </label>
+                              <label className="block">
+                                <span className="mb-2 block text-sm font-medium text-zinc-300">Upper price</span>
+                                <input
+                                  className={cx('w-full rounded-[1rem] border border-zinc-800 bg-zinc-900/80 px-4 py-3 text-zinc-100 outline-none transition placeholder:text-zinc-600', selectedCreateMeta.inputFocus)}
+                                  inputMode="decimal"
+                                  min="0.01"
+                                  step="0.01"
+                                  type="number"
+                                  value={gridUpperPrice}
+                                  onChange={(event) => setGridUpperPrice(event.target.value)}
+                                />
+                              </label>
+                              <label className="block">
+                                <span className="mb-2 block text-sm font-medium text-zinc-300">Grid levels</span>
+                                <input
+                                  className={cx('w-full rounded-[1rem] border border-zinc-800 bg-zinc-900/80 px-4 py-3 text-zinc-100 outline-none transition placeholder:text-zinc-600', selectedCreateMeta.inputFocus)}
+                                  inputMode="numeric"
+                                  min="2"
+                                  step="1"
+                                  type="number"
+                                  value={gridCount}
+                                  onChange={(event) => setGridCount(event.target.value)}
+                                />
+                              </label>
+                              <label className="block">
+                                <span className="mb-2 block text-sm font-medium text-zinc-300">Spacing (%)</span>
+                                <input
+                                  className={cx('w-full rounded-[1rem] border border-zinc-800 bg-zinc-900/80 px-4 py-3 text-zinc-100 outline-none transition placeholder:text-zinc-600', selectedCreateMeta.inputFocus)}
                                   inputMode="decimal"
                                   min="0.1"
                                   step="0.1"
                                   type="number"
-                                  value={gridStopLoss}
-                                  onChange={(event) => setGridStopLoss(event.target.value)}
+                                  value={gridSpacing}
+                                  onChange={(event) => setGridSpacing(event.target.value)}
                                 />
                               </label>
-                            ) : null}
+                            </div>
+
+                            <div className="mt-5 rounded-[1.25rem] border border-zinc-800 bg-zinc-900/50 p-4">
+                              <div className="flex items-center justify-between gap-4">
+                                <div>
+                                  <p className="text-sm font-medium text-zinc-200">Stop loss</p>
+                                  <p className="mt-1 text-xs leading-5 text-zinc-500">
+                                    Enable this only if you want the bot to warn when price breaks below your safety threshold.
+                                  </p>
+                                </div>
+                                <button
+                                  aria-checked={isGridStopLossEnabled}
+                                  aria-label="Toggle stop loss"
+                                  className={cx(
+                                    'relative inline-flex h-7 w-12 rounded-full transition-colors',
+                                    isGridStopLossEnabled ? 'bg-emerald-400' : 'bg-zinc-800',
+                                  )}
+                                  role="switch"
+                                  type="button"
+                                  onClick={() => setIsGridStopLossEnabled((current) => !current)}
+                                >
+                                  <span
+                                    className={cx(
+                                      'absolute top-1 h-5 w-5 rounded-full transition-all',
+                                      isGridStopLossEnabled ? 'left-6 bg-zinc-950' : 'left-1 bg-zinc-500',
+                                    )}
+                                  />
+                                </button>
+                              </div>
+                              {isGridStopLossEnabled ? (
+                                <label className="mt-4 block">
+                                  <span className="mb-2 block text-sm font-medium text-zinc-300">Stop loss (%)</span>
+                                  <input
+                                    className={cx('w-full rounded-[1rem] border border-zinc-800 bg-zinc-900/80 px-4 py-3 text-zinc-100 outline-none transition placeholder:text-zinc-600', selectedCreateMeta.inputFocus)}
+                                    inputMode="decimal"
+                                    min="0.1"
+                                    step="0.1"
+                                    type="number"
+                                    value={gridStopLoss}
+                                    onChange={(event) => setGridStopLoss(event.target.value)}
+                                  />
+                                </label>
+                              ) : null}
+                            </div>
+                          </>
+                        ) : null}
+
+                        {selectedBotType === 'rebalance' ? (
+                          <div className="mt-5 grid gap-4 sm:grid-cols-2">
+                            <label className="block">
+                              <span className="mb-2 block text-sm font-medium text-zinc-300">
+                                Target BTC allocation (%)
+                              </span>
+                              <input
+                                className={cx('w-full rounded-[1rem] border border-zinc-800 bg-zinc-900/80 px-4 py-3 text-zinc-100 outline-none transition placeholder:text-zinc-600', selectedCreateMeta.inputFocus)}
+                                inputMode="decimal"
+                                min="0"
+                                max="100"
+                                step="1"
+                                type="number"
+                                value={rebalanceTargetRatio}
+                                onChange={(event) => setRebalanceTargetRatio(event.target.value)}
+                              />
+                            </label>
+                            <label className="block">
+                              <span className="mb-2 block text-sm font-medium text-zinc-300">Drift threshold (%)</span>
+                              <input
+                                className={cx('w-full rounded-[1rem] border border-zinc-800 bg-zinc-900/80 px-4 py-3 text-zinc-100 outline-none transition placeholder:text-zinc-600', selectedCreateMeta.inputFocus)}
+                                inputMode="decimal"
+                                min="0.1"
+                                step="0.1"
+                                type="number"
+                                value={rebalanceThreshold}
+                                onChange={(event) => setRebalanceThreshold(event.target.value)}
+                              />
+                            </label>
+                            <label className="block sm:col-span-2">
+                              <span className="mb-2 block text-sm font-medium text-zinc-300">Check interval (minutes)</span>
+                              <input
+                                className={cx('w-full rounded-[1rem] border border-zinc-800 bg-zinc-900/80 px-4 py-3 text-zinc-100 outline-none transition placeholder:text-zinc-600', selectedCreateMeta.inputFocus)}
+                                inputMode="numeric"
+                                min="1"
+                                step="1"
+                                type="number"
+                                value={rebalanceInterval}
+                                onChange={(event) => setRebalanceInterval(event.target.value)}
+                              />
+                            </label>
                           </div>
+                        ) : null}
 
-                          <LadderPreview model={gridPreview} />
-                        </>
-                      ) : null}
-
-                      {selectedBotType === 'rebalance' ? (
-                        <div className="grid gap-4 sm:grid-cols-2">
-                          <label className="block">
-                            <span className="mb-2 block text-sm font-medium text-zinc-300">
-                              Target BTC allocation (%)
-                            </span>
-                            <input
-                              className={cx('w-full rounded-2xl border border-zinc-800 bg-zinc-900/80 px-4 py-3 text-zinc-100 outline-none transition placeholder:text-zinc-600', selectedCreateMeta.inputFocus)}
-                              inputMode="decimal"
-                              min="0"
-                              max="100"
-                              step="1"
-                              type="number"
-                              value={rebalanceTargetRatio}
-                              onChange={(event) => setRebalanceTargetRatio(event.target.value)}
-                            />
-                          </label>
-                          <label className="block">
-                            <span className="mb-2 block text-sm font-medium text-zinc-300">Drift threshold (%)</span>
-                            <input
-                              className={cx('w-full rounded-2xl border border-zinc-800 bg-zinc-900/80 px-4 py-3 text-zinc-100 outline-none transition placeholder:text-zinc-600', selectedCreateMeta.inputFocus)}
-                              inputMode="decimal"
-                              min="0.1"
-                              step="0.1"
-                              type="number"
-                              value={rebalanceThreshold}
-                              onChange={(event) => setRebalanceThreshold(event.target.value)}
-                            />
-                          </label>
-                          <label className="block sm:col-span-2">
-                            <span className="mb-2 block text-sm font-medium text-zinc-300">Check interval (minutes)</span>
-                            <input
-                              className={cx('w-full rounded-2xl border border-zinc-800 bg-zinc-900/80 px-4 py-3 text-zinc-100 outline-none transition placeholder:text-zinc-600', selectedCreateMeta.inputFocus)}
-                              inputMode="numeric"
-                              min="1"
-                              step="1"
-                              type="number"
-                              value={rebalanceInterval}
-                              onChange={(event) => setRebalanceInterval(event.target.value)}
-                            />
-                          </label>
-                        </div>
-                      ) : null}
-
-                      {selectedBotType === 'infinity-grid' ? (
-                        <>
-                          <div className="grid gap-4 sm:grid-cols-2">
+                        {selectedBotType === 'infinity-grid' ? (
+                          <div className="mt-5 grid gap-4 sm:grid-cols-2">
                             <label className="block">
                               <span className="mb-2 block text-sm font-medium text-zinc-300">Reference price</span>
                               <input
-                                className={cx('w-full rounded-2xl border border-zinc-800 bg-zinc-900/80 px-4 py-3 text-zinc-100 outline-none transition placeholder:text-zinc-600', selectedCreateMeta.inputFocus)}
+                                className={cx('w-full rounded-[1rem] border border-zinc-800 bg-zinc-900/80 px-4 py-3 text-zinc-100 outline-none transition placeholder:text-zinc-600', selectedCreateMeta.inputFocus)}
                                 inputMode="decimal"
                                 min="0.01"
                                 step="0.01"
@@ -2247,7 +2272,7 @@ function DashboardPage() {
                             <label className="block">
                               <span className="mb-2 block text-sm font-medium text-zinc-300">Spacing (%)</span>
                               <input
-                                className={cx('w-full rounded-2xl border border-zinc-800 bg-zinc-900/80 px-4 py-3 text-zinc-100 outline-none transition placeholder:text-zinc-600', selectedCreateMeta.inputFocus)}
+                                className={cx('w-full rounded-[1rem] border border-zinc-800 bg-zinc-900/80 px-4 py-3 text-zinc-100 outline-none transition placeholder:text-zinc-600', selectedCreateMeta.inputFocus)}
                                 inputMode="decimal"
                                 min="0.1"
                                 step="0.1"
@@ -2259,7 +2284,7 @@ function DashboardPage() {
                             <label className="block">
                               <span className="mb-2 block text-sm font-medium text-zinc-300">Order size (USD)</span>
                               <input
-                                className={cx('w-full rounded-2xl border border-zinc-800 bg-zinc-900/80 px-4 py-3 text-zinc-100 outline-none transition placeholder:text-zinc-600', selectedCreateMeta.inputFocus)}
+                                className={cx('w-full rounded-[1rem] border border-zinc-800 bg-zinc-900/80 px-4 py-3 text-zinc-100 outline-none transition placeholder:text-zinc-600', selectedCreateMeta.inputFocus)}
                                 inputMode="decimal"
                                 min="0.01"
                                 step="0.01"
@@ -2271,7 +2296,7 @@ function DashboardPage() {
                             <label className="block">
                               <span className="mb-2 block text-sm font-medium text-zinc-300">Levels per side</span>
                               <input
-                                className={cx('w-full rounded-2xl border border-zinc-800 bg-zinc-900/80 px-4 py-3 text-zinc-100 outline-none transition placeholder:text-zinc-600', selectedCreateMeta.inputFocus)}
+                                className={cx('w-full rounded-[1rem] border border-zinc-800 bg-zinc-900/80 px-4 py-3 text-zinc-100 outline-none transition placeholder:text-zinc-600', selectedCreateMeta.inputFocus)}
                                 inputMode="numeric"
                                 min="1"
                                 step="1"
@@ -2281,35 +2306,42 @@ function DashboardPage() {
                               />
                             </label>
                           </div>
+                        ) : null}
+                      </div>
 
-                          <LadderPreview model={infinityPreview} />
-                        </>
-                      ) : null}
+                      {selectedBotType === 'grid' ? <LadderPreview model={gridPreview} /> : null}
+                      {selectedBotType === 'infinity-grid' ? <LadderPreview model={infinityPreview} /> : null}
                     </div>
                   )}
 
-                  <div className="rounded-[1.5rem] border border-zinc-800 bg-zinc-900/60 p-4 text-sm leading-6 text-zinc-400">
-                    {selectedCreateMeta.launchNote}
+                  <div className="mt-auto grid gap-3">
+                    <div className={cx('rounded-[1.25rem] border px-4 py-4 text-sm leading-6', selectedCreateTone.helperCard)}>
+                      {selectedCreateMeta.launchNote}
+                    </div>
+                    <div className="rounded-[1.25rem] border border-dashed border-zinc-800 bg-[#0a0a0a] px-4 py-4 text-sm text-zinc-500">
+                      {isAiPilotEnabled
+                        ? 'AI Pilot will keep the parameters synced to the current budget and selected strategy.'
+                        : 'Manual mode is on. The values below are exactly what will be submitted.'}
+                    </div>
                   </div>
 
                   {aiDraftError ? (
-                    <div className="rounded-2xl border border-rose-500/20 bg-rose-500/10 px-4 py-3 text-sm text-rose-300">
+                    <div className="rounded-[1.15rem] border border-rose-500/20 bg-rose-500/10 px-4 py-3 text-sm text-rose-300">
                       {aiDraftError}
                     </div>
                   ) : null}
 
                   {createBotError ? (
-                    <div className="rounded-2xl border border-rose-500/20 bg-rose-500/10 px-4 py-3 text-sm text-rose-300">
+                    <div className="rounded-[1.15rem] border border-rose-500/20 bg-rose-500/10 px-4 py-3 text-sm text-rose-300">
                       {createBotError}
                     </div>
                   ) : null}
 
                   <div className="flex flex-col gap-3 border-t border-zinc-800/80 pt-5 sm:flex-row sm:items-center sm:justify-between">
-                    <p className="text-xs text-zinc-500">
-                      {isAiPilotEnabled
-                        ? 'AI Pilot will keep the parameters synced to the current budget and selected strategy.'
-                        : 'Manual mode is on. The values below are exactly what will be submitted.'}
-                    </p>
+                    <div className="flex items-center gap-3 text-xs uppercase tracking-[0.18em] text-zinc-500">
+                      <span className={cx('h-2.5 w-2.5 rounded-full', selectedCreateTone.dot)} />
+                      <span>Review setup and launch</span>
+                    </div>
                     <div className="flex items-center justify-end gap-3">
                       <button
                         className="rounded-xl border border-zinc-700 px-4 py-2 text-sm text-zinc-300 transition hover:border-zinc-500 hover:text-zinc-100"
