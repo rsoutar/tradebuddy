@@ -194,7 +194,7 @@ def create_api(trading_app: Optional[TradingBotApp] = None) -> FastAPI:
     @api.post("/api/bots/draft")
     def draft_bot_setup(payload: ManagedBotDraftRequest) -> dict:
         try:
-            return app_state.build_managed_bot_setup(
+            return app_state.build_managed_bot_setup_with_cache(
                 payload.strategy,
                 budget_usd=payload.budget_usd,
                 user_id=payload.user_id,
@@ -202,6 +202,21 @@ def create_api(trading_app: Optional[TradingBotApp] = None) -> FastAPI:
             )
         except ValueError as error:
             raise HTTPException(status_code=400, detail=str(error)) from error
+
+    @api.post("/api/bots/recommendations")
+    def invalidate_recommendation_cache() -> dict:
+        app_state._rec_cache.invalidate()
+        return {"ok": True, "message": "Recommendation cache invalidated. Next draft request will generate fresh recommendations."}
+
+    @api.get("/api/bots/recommendations/status")
+    def get_recommendation_cache_status() -> dict:
+        is_fresh = app_state._is_cache_fresh()
+        cache = app_state._get_cached_recommendation()
+        return {
+            "is_fresh": is_fresh,
+            "generated_at": cache.recommendation.generated_at if cache else None,
+            "is_llm_generated": cache.recommendation.is_llm_generated if cache else False,
+        }
 
     @api.post("/api/bots/{bot_id}/start")
     def start_bot(bot_id: str, payload: BotControlRequest) -> dict:

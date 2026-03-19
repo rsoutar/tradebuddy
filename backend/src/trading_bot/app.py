@@ -33,6 +33,11 @@ from trading_bot.services.market_data import (
     read_shared_price_window,
 )
 from trading_bot.services.risk import RiskManager
+from trading_bot.services.recommendation_cache import (
+    GeneratedRecommendation,
+    RecommendationCache,
+    RecommendationCacheStore,
+)
 from trading_bot.services.support_resistance import SupportResistanceDetector
 from trading_bot.settings import AppSettings, load_settings
 from trading_bot.strategies.grid import GridStrategy
@@ -74,6 +79,7 @@ class TradingBotApp:
             self.paper_store,
             enabled=worker_autostart,
         )
+        self._rec_cache = RecommendationCacheStore(settings.runtime.state_dir)
 
     def _create_exchange_client(self):
         if self.settings.exchange.api_key and self.settings.exchange.api_secret:
@@ -528,6 +534,267 @@ class TradingBotApp:
             f"${float(config.get('order_size_usd', 100.0)):,.0f} per order • "
             f"{float(config['spacing_pct']):.1f}% spacing"
         )
+
+    def _get_cached_recommendation(self) -> Optional[RecommendationCache]:
+        try:
+            return self._rec_cache.get()
+        except Exception:
+            import logging
+            logging.getLogger(__name__).exception("[RecCache] Failed to load cache")
+            return None
+
+    def _is_cache_fresh(self) -> bool:
+        return self._rec_cache.is_fresh()
+
+    def _generate_llm_recommendation(
+        self,
+        snapshot: MarketSnapshot,
+        sr: Optional[SupportResistanceResult],
+    ) -> Optional[GeneratedRecommendation]:
+        try:
+            from trading_bot.services.ai import generate_llm_recommendation
+            raw = generate_llm_recommendation(snapshot, sr, self.settings.ai)
+            if not raw:
+                return None
+            return GeneratedRecommendation(
+                generated_at=datetime.now(timezone.utc).isoformat(),
+                is_llm_generated=True,
+                headline=raw.get("headline"),
+                rationale=raw.get("rationale"),
+                market_snapshot=asdict(snapshot),
+                grid_config=raw.get("grid"),
+                rebalance_config=raw.get("rebalance"),
+                infinity_config=raw.get("infinity_grid"),
+            )
+        except Exception:
+            import logging
+            logging.getLogger(__name__).exception("[RecCache] LLM recommendation generation failed")
+            return None
+
+    def _apply_llm_config_to_strategy(
+        self,
+        strategy_type: StrategyType,
+        config_dict: dict[str, Any],
+        snapshot: MarketSnapshot,
+    ) -> Union[GridBotConfig, RebalanceBotConfig, InfinityGridBotConfig]:
+        def clamp(value: float, minimum: float, maximum: float) -> float:
+            return max(minimum, min(maximum, value))
+        volatility = clamp(snapshot.volatility_24h_pct or 0.0, 1.5, 12.0)
+
+        if strategy_type is StrategyType.GRID:
+            lower = config_dict.get("lower_price", snapshot.price * 0.92)
+            upper = config_dict.get("upper_price", snapshot.price * 1.08)
+            count = int(clamp(config_dict.get("grid_count", 8), 6, 14))
+            spacing = round(clamp(config_dict.get("spacing_pct", 2.0), 1.2, 3.4), 1)
+            stop_enabled = bool(config_dict.get("stop_loss_enabled", volatility >= 6.0))
+            stop_pct = round(clamp(config_dict.get("stop_loss_pct", volatility * 2 + 2.5), 6.0, 18.0), 1) if stop_enabled else None
+            return GridBotConfig(
+                lower_price=round(lower, 2),
+                upper_price=round(upper, 2),
+                grid_count=count,
+                spacing_pct=spacing,
+                stop_loss_enabled=stop_enabled,
+                stop_loss_pct=stop_pct,
+            )
+
+        if strategy_type is StrategyType.REBALANCE:
+            return RebalanceBotConfig(
+                target_btc_ratio=round(clamp(config_dict.get("target_btc_ratio", 0.5), 0.35, 0.65), 2),
+                rebalance_threshold_pct=round(clamp(config_dict.get("rebalance_threshold_pct", volatility * 0.8), 2.5, 8.0), 1),
+                interval_minutes=int(clamp(config_dict.get("interval_minutes", 60), 30, 60)),
+            )
+
+        return InfinityGridBotConfig(
+            reference_price=round(config_dict.get("reference_price", snapshot.price), 2),
+            spacing_pct=round(clamp(config_dict.get("spacing_pct", 1.5), 0.9, 2.6), 1),
+            order_size_usd=round(max(10.0, config_dict.get("order_size_usd", 100.0)), 2),
+            levels_per_side=int(clamp(config_dict.get("levels_per_side", 6), 3, 6)),
+        )
+
+    def _build_llm_guided_setup(
+        self,
+        strategy_type: StrategyType,
+        budget_usd: float,
+        snapshot: MarketSnapshot,
+        sr: Optional[SupportResistanceResult],
+        rec: GeneratedRecommendation,
+    ) -> tuple[
+        Union[GridBotConfig, RebalanceBotConfig, InfinityGridBotConfig],
+        str,
+        str,
+        list[str],
+    ]:
+        def clamp(value: float, minimum: float, maximum: float) -> float:
+            return max(minimum, min(maximum, value))
+
+        volatility = clamp(snapshot.volatility_24h_pct or 0.0, 1.5, 12.0)
+        trend = snapshot.trend.lower()
+        is_bullish = "bull" in trend or "up" in trend
+        is_bearish = "bear" in trend or "down" in trend
+
+        if strategy_type is StrategyType.GRID:
+            config_dict = rec.grid_config or {}
+            raw_config = self._apply_llm_config_to_strategy(strategy_type, config_dict, snapshot)
+            assert isinstance(raw_config, GridBotConfig)
+            config = raw_config
+            required_budget_usd, _ = self._minimum_budget_required(strategy_type, snapshot, config)
+            while required_budget_usd > budget_usd and config.grid_count > 4:
+                config = GridBotConfig(
+                    lower_price=config.lower_price,
+                    upper_price=config.upper_price,
+                    grid_count=config.grid_count - 1,
+                    spacing_pct=round(config.spacing_pct + 0.2, 1),
+                    stop_loss_enabled=config.stop_loss_enabled,
+                    stop_loss_pct=config.stop_loss_pct,
+                )
+                required_budget_usd, _ = self._minimum_budget_required(strategy_type, snapshot, config)
+            buy_levels = len([level for level in config.price_levels() if level < snapshot.price])
+            headline = rec.headline or "AI Pilot widened the ladder around the live BTC regime."
+            rationale = rec.rationale or (
+                f"BTC/USDT is printing {snapshot.trend} conditions with {snapshot.volatility_24h_pct:.1f}% "
+                f"24h volatility, so the launch range now stretches from ${config.lower_price:,.0f} "
+                f"to ${config.upper_price:,.0f} with {config.grid_count} levels."
+            )
+            highlights = [
+                f"{buy_levels} buy levels sit below the current ${snapshot.price:,.0f} spot for immediate deployment.",
+                f"Budget target: ${budget_usd:,.0f} against an estimated minimum of ${required_budget_usd:,.0f}.",
+                (
+                    f"Safety rail enabled at {config.stop_loss_pct:.1f}% below the working band."
+                    if config.stop_loss_enabled and config.stop_loss_pct is not None
+                    else "Stop-loss is disabled so the grid can stay fully range-focused."
+                ),
+            ]
+            return config, headline, rationale, highlights
+
+        if strategy_type is StrategyType.REBALANCE:
+            config_dict = rec.rebalance_config or {}
+            raw_config = self._apply_llm_config_to_strategy(strategy_type, config_dict, snapshot)
+            assert isinstance(raw_config, RebalanceBotConfig)
+            config = raw_config
+            required_budget_usd, _ = self._minimum_budget_required(strategy_type, snapshot, config)
+            headline = rec.headline or "AI Pilot centered the BTC allocation for steadier drift control."
+            rationale = rec.rationale or (
+                f"With {snapshot.volatility_24h_pct:.1f}% daily volatility and a {snapshot.trend} tape, "
+                f"the setup keeps {config.target_btc_ratio * 100:.0f}% of the budget in BTC, waits for "
+                f"{config.rebalance_threshold_pct:.1f}% drift, and reviews exposure every {config.interval_minutes} minutes."
+            )
+            highlights = [
+                f"Budget target: ${budget_usd:,.0f} against an estimated minimum of ${required_budget_usd:,.0f}.",
+                f"Spot change is {snapshot.change_24h_pct:+.1f}% over 24h, so the ratio leans {'slightly long' if config.target_btc_ratio >= 0.5 else 'slightly defensive'}.",
+                "Switch to manual mode if you want a custom BTC allocation.",
+            ]
+            return config, headline, rationale, highlights
+
+        levels_per_side = 3
+        if budget_usd >= 1200:
+            levels_per_side = 6
+        elif budget_usd >= 800:
+            levels_per_side = 5
+        elif budget_usd >= 500:
+            levels_per_side = 4
+        config_dict = rec.infinity_config or {}
+        config_dict["levels_per_side"] = config_dict.get("levels_per_side", levels_per_side)
+        raw_config = self._apply_llm_config_to_strategy(strategy_type, config_dict, snapshot)
+        assert isinstance(raw_config, InfinityGridBotConfig)
+        config = raw_config
+        required_budget_usd, _ = self._minimum_budget_required(strategy_type, snapshot, config)
+        if required_budget_usd > budget_usd:
+            config = InfinityGridBotConfig(
+                reference_price=config.reference_price,
+                spacing_pct=config.spacing_pct,
+                order_size_usd=round(max(10.0, budget_usd * 0.48 / config.levels_per_side), 2),
+                levels_per_side=config.levels_per_side,
+            )
+        headline = rec.headline or "AI Pilot tuned a geometric ladder for trend follow-through."
+        rationale = rec.rationale or (
+            f"BTC/USDT is carrying a {snapshot.trend} profile, so the ladder stays anchored at "
+            f"${config.reference_price:,.0f} with {config.levels_per_side} levels per side."
+        )
+        highlights = [
+            f"Budget target: ${budget_usd:,.0f} against an estimated minimum of ${required_budget_usd:,.0f}.",
+            f"The ladder is split evenly around spot so it can keep re-arming both sides after fills.",
+            "Wider spacing here reduces churn and leaves more room for continuation when volatility expands.",
+        ]
+        return config, headline, rationale, highlights
+
+    def build_managed_bot_setup_with_cache(
+        self,
+        strategy_type: StrategyType,
+        *,
+        budget_usd: float,
+        user_id: str = "demo-user",
+        user_name: str = "Demo Trader",
+    ) -> dict[str, Any]:
+        timestamp = self._timestamp()
+        snapshot = self.market_data.get_snapshot(self.settings.runtime.symbol)
+        account_state = self.paper_store.ensure_account(
+            user_id=user_id,
+            user_name=user_name,
+            timestamp=timestamp,
+        )
+        normalized_budget_usd = round(budget_usd, 2)
+
+        sr: Optional[SupportResistanceResult] = None
+        try:
+            sr = self.sr_detector.detect(snapshot.price)
+        except Exception:
+            import logging
+            logging.getLogger(__name__).exception("[build_managed_bot_setup] S/R detection failed")
+
+        rec_cache = self._get_cached_recommendation()
+        rec = rec_cache.recommendation if rec_cache else None
+
+        if rec is None:
+            rec = self._generate_llm_recommendation(snapshot, sr)
+            if rec:
+                self._rec_cache.save(RecommendationCache(recommendation=rec))
+
+        if rec and rec.is_llm_generated:
+            config, headline, rationale, highlights = self._build_llm_guided_setup(
+                strategy_type,
+                budget_usd=normalized_budget_usd,
+                snapshot=snapshot,
+                sr=sr,
+                rec=rec,
+            )
+        else:
+            config, headline, rationale, highlights = self._build_managed_bot_setup(
+                strategy_type,
+                budget_usd=normalized_budget_usd,
+                snapshot=snapshot,
+                sr=sr,
+            )
+
+        config_payload = asdict(config)
+        required_budget_usd, blocking_reason = self._minimum_budget_required(
+            strategy_type,
+            snapshot,
+            config,
+        )
+
+        return {
+            "generatedAt": timestamp,
+            "strategy": strategy_type.value,
+            "strategyLabel": self._strategy_label(strategy_type),
+            "budgetUsd": normalized_budget_usd,
+            "availableReserveUsd": round(self._reserve_total_usd(account_state, snapshot), 2),
+            "requiredBudgetUsd": required_budget_usd,
+            "fitsBudget": blocking_reason is None and normalized_budget_usd + 1e-9 >= required_budget_usd,
+            "marketSnapshot": {
+                "symbol": snapshot.symbol,
+                "price": round(snapshot.price, 2),
+                "change24hPct": round(snapshot.change_24h_pct, 2),
+                "volatility24hPct": round(snapshot.volatility_24h_pct, 2),
+                "trend": snapshot.trend,
+            },
+            "headline": headline,
+            "rationale": rationale,
+            "highlights": highlights,
+            "configSummary": self._config_summary(strategy_type, config_payload, snapshot),
+            "gridConfig": config_payload if strategy_type is StrategyType.GRID else None,
+            "rebalanceConfig": config_payload if strategy_type is StrategyType.REBALANCE else None,
+            "infinityConfig": config_payload if strategy_type is StrategyType.INFINITY_GRID else None,
+        }
 
     def _build_managed_bot_setup(
         self,

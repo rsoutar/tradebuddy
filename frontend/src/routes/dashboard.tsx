@@ -13,10 +13,20 @@ import type {
   DashboardState,
   MarketConnectionState,
   MarketState,
+  RecommendationCacheStatus,
   StrategyComparisonResult,
   StrategyKey,
 } from '../lib/session'
-import { createBot, depositPaperFunds, getAiBotDraft, getDashboard, getStrategyComparison, stopBot } from '../lib/session'
+import {
+  createBot,
+  depositPaperFunds,
+  getAiBotDraft,
+  getDashboard,
+  getRecommendationCacheStatus,
+  getStrategyComparison,
+  invalidateRecommendationCache,
+  stopBot,
+} from '../lib/session'
 import { useTheme } from '../lib/theme'
 
 const strategyLabels: Record<StrategyKey, string> = {
@@ -819,6 +829,8 @@ function DashboardPage() {
   const [isAiDraftLoading, setIsAiDraftLoading] = useState(false)
   const [aiDraftError, setAiDraftError] = useState<string>()
   const [aiDraft, setAiDraft] = useState<AiBotDraft>()
+  const [recCacheStatus, setRecCacheStatus] = useState<RecommendationCacheStatus | null>(null)
+  const [isRefreshingRec, setIsRefreshingRec] = useState(false)
   const [gridLowerPrice, setGridLowerPrice] = useState('')
   const [gridUpperPrice, setGridUpperPrice] = useState('')
   const [gridCount, setGridCount] = useState('8')
@@ -924,6 +936,7 @@ function DashboardPage() {
     setAiDraft(undefined)
     setIsAiDraftLoading(false)
     setIsAiPilotEnabled(true)
+    setRecCacheStatus(null)
     setGridLowerPrice('')
     setGridUpperPrice('')
     setGridCount('8')
@@ -1159,6 +1172,18 @@ function DashboardPage() {
       .finally(() => {
         if (!cancelled) {
           setIsComparingStrategies(false)
+        }
+      })
+
+    getRecommendationCacheStatus()
+      .then((status) => {
+        if (!cancelled) {
+          setRecCacheStatus(status)
+        }
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setRecCacheStatus(null)
         }
       })
 
@@ -2131,10 +2156,40 @@ function DashboardPage() {
                       <div className={cx('relative overflow-hidden rounded-[1.5rem] border p-5 sm:p-6', selectedCreateTone.aiCard)}>
                         <div className="absolute left-0 right-0 top-0 h-px bg-gradient-to-r from-white/0 via-white/30 to-white/0" />
                         <div className="flex items-start justify-between gap-4">
-                          <div>
-                            <p className={cx('text-xs font-medium uppercase tracking-[0.28em]', selectedCreateTone.aiAccent)}>
-                              AI Pilot
-                            </p>
+                          <div className="min-w-0 flex-1">
+                            <div className="flex flex-wrap items-center gap-2">
+                              <p className={cx('text-xs font-medium uppercase tracking-[0.28em]', selectedCreateTone.aiAccent)}>
+                                AI Pilot
+                              </p>
+                              {recCacheStatus && (
+                                <span className={cx(
+                                  'inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[10px] font-medium uppercase tracking-wide',
+                                  recCacheStatus.is_llm_generated && recCacheStatus.is_fresh
+                                    ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-400'
+                                    : 'border-zinc-600/50 bg-zinc-800/50 text-zinc-400',
+                                )}>
+                                  <span className={cx(
+                                    'h-1.5 w-1.5 rounded-full',
+                                    recCacheStatus.is_llm_generated && recCacheStatus.is_fresh ? 'bg-emerald-400' : 'bg-zinc-500',
+                                  )} />
+                                  {recCacheStatus.is_llm_generated
+                                    ? recCacheStatus.is_fresh ? 'LLM · Fresh' : 'LLM · Stale'
+                                    : 'Rule-based'}
+                                </span>
+                              )}
+                              {recCacheStatus?.generated_at && (
+                                <span className="text-[10px] text-zinc-500">
+                                  Generated {(() => {
+                                    try {
+                                      const d = new Date(recCacheStatus.generated_at!)
+                                      return d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })
+                                    } catch {
+                                      return recCacheStatus.generated_at
+                                    }
+                                  })()}
+                                </span>
+                              )}
+                            </div>
                             <h4 className="mt-3 text-xl font-medium tracking-tight text-zinc-100 sm:text-2xl">
                               {parsedBudgetUsd
                                 ? aiDraft?.headline ?? 'Preparing the managed setup...'
@@ -2147,12 +2202,34 @@ function DashboardPage() {
                                 : 'This mode uses the analyst engine to adapt the launch parameters to the current BTC market before you initialize the bot.'}
                             </p>
                           </div>
-                          <div className={cx('flex h-10 w-10 items-center justify-center rounded-full border border-white/10 bg-zinc-950/70', selectedCreateTone.aiIcon)}>
-                            {isAiDraftLoading ? (
-                              <Icon icon="solar:refresh-line-duotone" width={18} height={18} className="animate-spin" />
-                            ) : (
-                              <Icon icon="solar:stars-line-duotone" width={18} height={18} />
-                            )}
+                          <div className="flex shrink-0 flex-col items-end gap-2">
+                            <div className={cx('flex h-10 w-10 items-center justify-center rounded-full border border-white/10 bg-zinc-950/70', selectedCreateTone.aiIcon)}>
+                              {isAiDraftLoading ? (
+                                <Icon icon="solar:refresh-line-duotone" width={18} height={18} className="animate-spin" />
+                              ) : (
+                                <Icon icon="solar:stars-line-duotone" width={18} height={18} />
+                              )}
+                            </div>
+                            <button
+                              className="flex items-center gap-1 rounded-full border border-zinc-700/60 bg-zinc-900/80 px-2.5 py-1 text-[10px] font-medium text-zinc-400 transition-colors hover:border-zinc-600 hover:text-zinc-200"
+                              onClick={async () => {
+                                setIsRefreshingRec(true)
+                                try {
+                                  await invalidateRecommendationCache()
+                                  setRecCacheStatus({ is_fresh: false, generated_at: null, is_llm_generated: false })
+                                  setAiDraft(undefined)
+                                } catch {
+                                  // silently fail
+                                } finally {
+                                  setIsRefreshingRec(false)
+                                }
+                              }}
+                              title="Refresh AI recommendations"
+                              type="button"
+                            >
+                              <Icon icon="solar:refresh-line-duotone" width={10} height={10} className={isRefreshingRec ? 'animate-spin' : ''} />
+                              Refresh
+                            </button>
                           </div>
                         </div>
 

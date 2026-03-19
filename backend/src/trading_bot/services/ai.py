@@ -6,6 +6,7 @@ from dataclasses import asdict, dataclass
 from datetime import datetime
 from typing import Any, AsyncGenerator, Optional
 
+import openai
 from pydantic_ai import Agent, RunContext
 from pydantic_ai.messages import (
     FunctionToolCallEvent,
@@ -523,3 +524,144 @@ async def stream_chat(
             yield {"type": "done"}
     except Exception as exc:
         yield {"type": "error", "content": str(exc)}
+
+
+LLM_RECOMMENDATION_PROMPT = """You are Oscar's BTC strategy recommendation engine for Binance spot trading.
+
+CURRENT MARKET CONDITIONS:
+- BTC/USDT price: {price}
+- 24h change: {change_pct}% ({trend})
+- 24h volatility: {volatility}%
+- Price position: {price_position}
+
+SUPPORT/RESISTANCE LEVELS:
+{sr_zones}
+
+TASK: Recommend trading bot parameters for all 3 strategies. Output ONLY valid JSON like this (no markdown, no text):
+
+{{"headline":"[brief headline]","rationale":"[2 sentences]","grid":{{"lower_price":[number],"upper_price":[number],"grid_count":[6-14],"spacing_pct":[1.2-3.4],"stop_loss_enabled":[true/false],"stop_loss_pct":[6-18]}},"rebalance":{{"target_btc_ratio":[0.35-0.65],"rebalance_threshold_pct":[2.5-8.0],"interval_minutes":[30/45/60]}},"infinity_grid":{{"reference_price":[number],"spacing_pct":[0.9-2.6],"order_size_usd":[number],"levels_per_side":[3-6]}}}}
+
+RULES:
+- lower_price should be a key S/R support below current price
+- upper_price should be a key S/R resistance above current price
+- grid_count: 6-14, higher for volatile markets
+- stop_loss_enabled: true if volatility >= 6% or bearish
+- Do NOT include any text before or after the JSON
+- Do NOT use markdown code blocks
+"""
+
+
+def generate_llm_recommendation(
+    snapshot: Any,
+    sr: Any,
+    ai_settings: Any,
+) -> dict[str, Any]:
+    """Generate LLM-powered strategy recommendations from market snapshot and S/R data.
+
+    Returns a dict with headline, rationale, and strategy configs (grid, rebalance, infinity_grid).
+    """
+    if not ai_settings.enabled:
+        logger.warning("[LLMRec] AI is disabled, skipping LLM recommendation")
+        return {}
+
+    top_supports = []
+    top_resistances = []
+    if sr and sr.zones:
+        supports = [z for z in sr.zones if z.zone_type == "support"]
+        resistances = [z for z in sr.zones if z.zone_type == "resistance"]
+        supports.sort(key=lambda z: z.center_price, reverse=True)
+        resistances.sort(key=lambda z: z.center_price)
+        for z in supports[:3]:
+            top_supports.append(
+                f"  - ${z.center_price:,.2f} (strength={z.strength:.2f}, touches={z.touches})"
+            )
+        for z in resistances[:3]:
+            top_resistances.append(
+                f"  - ${z.center_price:,.2f} (strength={z.strength:.2f}, touches={z.touches})"
+            )
+
+    sr_block = ""
+    if top_supports:
+        sr_block += "Top Support Zones:\n" + "\n".join(top_supports) + "\n"
+    if top_resistances:
+        sr_block += "Top Resistance Zones:\n" + "\n".join(top_resistances) + "\n"
+    if not sr_block:
+        sr_block = "No S/R zones detected — use percentage-based levels from spot price."
+
+    price = snapshot.price
+    volatility = snapshot.volatility_24h_pct or 0.0
+    lower_pct = max(4.5, min(16.0, volatility * 1.75))
+    upper_pct = max(4.5, min(16.0, volatility * 1.65))
+
+    prompt = LLM_RECOMMENDATION_PROMPT.format(
+        price=f"${price:,.2f}",
+        change_pct=f"{snapshot.change_24h_pct:+.1f}" if snapshot.change_24h_pct else "0.0",
+        trend=snapshot.trend or "neutral",
+        volatility=f"{volatility:.1f}",
+        price_position=sr.price_position if sr else "unknown",
+        sr_zones=sr_block,
+        lower_pct=f"{lower_pct:.1f}",
+        upper_pct=f"{upper_pct:.1f}",
+    )
+
+    try:
+        logger.info(
+            "[LLMRec] Calling LLM: model=%s, provider=%s, api_key_prefix=%.4s, price=%s, volatility=%s",
+            ai_settings.model_name,
+            ai_settings.provider,
+            ai_settings.api_key or "MISSING",
+            price,
+            volatility,
+        )
+        client = openai.OpenAI(
+            api_key=ai_settings.api_key,
+            base_url=ai_settings.base_url,
+        )
+        response = client.chat.completions.create(
+            model=ai_settings.model_name,
+            messages=[
+                {
+                    "role": "system",
+                    "content": "You are a precise quantitative trading analyst. Output valid JSON only.",
+                },
+                {"role": "user", "content": prompt},
+            ],
+            temperature=0.3,
+            max_tokens=1024,
+        )
+        raw_content = response.choices[0].message.content or "{}"
+        logger.info("[LLMRec] LLM raw response: %s", raw_content[:200])
+        content = response.choices[0].message.content or "{}"
+        content = content.strip()
+        if content.startswith("```json"):
+            content = content[7:]
+        if content.startswith("```"):
+            content = content[3:]
+        if content.endswith("```"):
+            content = content[:-3]
+        content = content.strip()
+
+        # Try to find JSON object in the response
+        start = content.find('{')
+        end = content.rfind('}') + 1
+        if start != -1 and end > start:
+            content = content[start:end]
+
+        result = json.loads(content)
+
+        # Validate required top-level keys
+        required_keys = {"headline", "rationale", "grid", "rebalance", "infinity_grid"}
+        if not required_keys.issubset(result.keys()):
+            missing = required_keys - set(result.keys())
+            logger.warning("[LLMRec] LLM response missing keys: %s. Response: %s", missing, content[:200])
+            return {}
+
+        logger.info(
+            "[LLMRec] Generated recommendation (price=%.2f, volatility=%.1f%%)",
+            price,
+            volatility,
+        )
+        return result
+    except Exception:
+        logger.exception("[LLMRec] Failed to generate LLM recommendation")
+        return {}
