@@ -191,3 +191,23 @@ class StrategyEvaluation:
     orders: list[OrderIntent] = field(default_factory=list)
     warnings: list[str] = field(default_factory=list)
     metrics: dict[str, float] = field(default_factory=dict)
+
+
+@dataclass(frozen=True)
+class SupportResistanceZone:
+    lower_price: float
+    upper_price: float
+    center_price: float
+    touches: int
+    avg_volume: float
+    strength: float
+    zone_type: str  # 'support' | 'resistance'
+
+
+@dataclass(frozen=True)
+class SupportResistanceResult:
+    zones: list[SupportResistanceZone]
+    nearest_support: Optional[SupportResistanceZone]
+    nearest_resistance: Optional[SupportResistanceZone]
+    price_position: str  # 'near_support' | 'near_resistance' | 'mid_range' | 'above_resistance' | 'below_support'
+    current_price: float

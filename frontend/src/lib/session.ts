@@ -271,6 +271,45 @@ export type AiBotDraft = {
   } | null
 }
 
+export type StrategyComparisonItem = {
+  strategy: StrategyKey
+  mode: string
+  config_summary: string
+  order_count: number
+  summary: string
+  risk_warnings: string[]
+  strategy_warnings: string[]
+  notional_usd: number
+  min_budget_usd: number
+  budget_note: string | null
+  recommended: boolean
+}
+
+export type SRZone = {
+  lower_price: number
+  upper_price: number
+  center_price: number
+  touches: number
+  strength: number
+  zone_type: 'support' | 'resistance'
+}
+
+export type SRResult = {
+  zones: SRZone[]
+  nearest_support: SRZone | null
+  nearest_resistance: SRZone | null
+  price_position: string
+  current_price: number
+}
+
+export type StrategyComparisonResult = {
+  market: MarketState
+  support_resistance: SRResult | null
+  recommendation: StrategyKey
+  reason: string
+  strategies: StrategyComparisonItem[]
+}
+
 export type BacktestInput = {
   strategy: StrategyKey
   startAt?: string
@@ -822,6 +861,18 @@ export const getAiBotDraft = createServerFn({ method: 'POST' }).handler(async ({
       ...getUserScope(session.data.user),
     }),
   })
+})
+
+export const getStrategyComparison = createServerFn({ method: 'GET' }).handler(async () => {
+  return fetchBackend<StrategyComparisonResult>(
+    new URL('/api/strategies/compare', getBackendApiBaseUrl()).toString(),
+  )
+})
+
+export const getSupportResistance = createServerFn({ method: 'GET' }).handler(async () => {
+  return fetchBackend<SRResult>(
+    new URL('/api/support-resistance', getBackendApiBaseUrl()).toString(),
+  )
 })
 
 export const stopBot = createServerFn({ method: 'POST' }).handler(async ({ data }) => {

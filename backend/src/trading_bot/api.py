@@ -152,6 +152,14 @@ def create_api(trading_app: Optional[TradingBotApp] = None) -> FastAPI:
     ) -> dict:
         return app_state.bot_activity(user_id=user_id, user_name=user_name)
 
+    @api.get("/api/strategies/compare")
+    def compare_strategies() -> dict:
+        return app_state.compare_strategies()
+
+    @api.get("/api/support-resistance")
+    def get_support_resistance() -> dict:
+        return app_state.detect_support_resistance()
+
     @api.get("/api/strategies/{strategy}")
     def get_strategy_preview(strategy: StrategyType) -> dict:
         return app_state.demo_strategy(strategy)
