@@ -1365,6 +1365,9 @@ class TradingBotApp:
         self.process_manager.request_stop(bot_id)
         return self.dashboard(user_id=user_id, user_name=user_name)
 
+    def recover_running_bots(self) -> list[str]:
+        return self.process_manager.recover_running_bots()
+
 
 def create_app(
     *,

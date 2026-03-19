@@ -2,6 +2,7 @@ FROM node:22-bookworm-slim
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
+    PATH=/opt/venv/bin:$PATH \
     HOST=0.0.0.0 \
     PORT=80 \
     TRADING_BOT_API_HOST=127.0.0.1 \

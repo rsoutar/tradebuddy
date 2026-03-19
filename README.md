@@ -90,6 +90,7 @@ The repository root [`Dockerfile`](Dockerfile) builds a single-container image f
 - serves HTTP on port `80`
 - exposes `GET /up` for health checks
 - stores backend state and logs under `/storage`
+- restores persisted paper-trading bot workers after container startup
 - honors runtime-provided `HOST`, `PORT`, `TRADING_BOT_API_HOST`, and `TRADING_BOT_API_PORT` values
 
 Build it locally with:
