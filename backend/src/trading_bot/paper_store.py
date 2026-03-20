@@ -874,7 +874,7 @@ class PaperTradingStore:
 
             planned_rows = connection.execute(
                 """
-                SELECT id, side, amount, price, notional_usd
+                SELECT id, side, order_type, amount, price, notional_usd
                 FROM paper_trades
                 WHERE bot_id = ? AND status = 'planned'
                 ORDER BY
@@ -887,14 +887,21 @@ class PaperTradingStore:
 
             for row in planned_rows:
                 side = row["side"]
+                order_type = row["order_type"]
                 price = round(float(row["price"]), 2)
                 amount = float(row["amount"])
                 notional_usd = round(float(row["notional_usd"]), 2)
-                is_triggered = (
-                    side == OrderSide.BUY.value and low_price <= price
-                ) or (
-                    side == OrderSide.SELL.value and high_price >= price
-                )
+                
+                # MARKET orders are always triggered (immediate execution)
+                if order_type == "market":
+                    is_triggered = True
+                else:
+                    # LIMIT orders require price to reach order price
+                    is_triggered = (
+                        side == OrderSide.BUY.value and low_price <= price
+                    ) or (
+                        side == OrderSide.SELL.value and high_price >= price
+                    )
                 if not is_triggered:
                     continue
                 if side == OrderSide.BUY.value and usd_balance + 1e-9 < notional_usd:
@@ -915,15 +922,25 @@ class PaperTradingStore:
                 if side == OrderSide.BUY.value:
                     usd_balance = round(usd_balance - notional_usd, 8)
                     btc_balance = round(btc_balance + amount, 8)
-                    detail = (
-                        f"Paper buy filled at ${price:,.2f} as BTC/USDT traded down into the resting limit."
-                    )
+                    if order_type == "market":
+                        detail = (
+                            f"Paper buy filled at ${price:,.2f} via market order (immediate execution)."
+                        )
+                    else:
+                        detail = (
+                            f"Paper buy filled at ${price:,.2f} as BTC/USDT traded down into the resting limit."
+                        )
                 else:
                     usd_balance = round(usd_balance + notional_usd, 8)
                     btc_balance = round(max(btc_balance - amount, 0.0), 8)
-                    detail = (
-                        f"Paper sell filled at ${price:,.2f} as BTC/USDT traded up into the resting limit."
-                    )
+                    if order_type == "market":
+                        detail = (
+                            f"Paper sell filled at ${price:,.2f} via market order (immediate execution)."
+                        )
+                    else:
+                        detail = (
+                            f"Paper sell filled at ${price:,.2f} as BTC/USDT traded up into the resting limit."
+                        )
 
                 self._insert_event(
                     connection,
@@ -1514,7 +1531,7 @@ class PaperTradingStore:
                 """
                 SELECT id
                 FROM bot_instances
-                WHERE status = 'paper-running'
+                WHERE (status = 'paper-running' OR status = 'crashed')
                   AND desired_status = 'running'
                 ORDER BY started_at ASC, id ASC
                 LIMIT ?
@@ -1750,6 +1767,76 @@ class PaperTradingStore:
                     ),
                     timestamp=timestamp,
                 )
+
+    def reallocate_bot_balances(self, *, bot_id: str, timestamp: str) -> bool:
+        """Re-allocate balances to a bot that was previously released.
+        
+        Returns True if balances were reallocated, False otherwise.
+        """
+        numeric_id = int(bot_id.replace("bot-", "", 1))
+        with self._connect() as connection:
+            row = connection.execute(
+                """
+                SELECT
+                    b.user_id,
+                    b.initial_usd_balance,
+                    b.initial_btc_balance,
+                    b.released_to_account,
+                    a.usd_balance AS account_usd_balance,
+                    a.btc_balance AS account_btc_balance
+                FROM bot_instances b
+                INNER JOIN paper_accounts a ON a.user_id = b.user_id
+                WHERE b.id = ?
+                """,
+                (numeric_id,),
+            ).fetchone()
+            
+            if row is None:
+                return False
+            
+            if not bool(row["released_to_account"]):
+                return False
+            
+            initial_usd = float(row["initial_usd_balance"] or 0)
+            initial_btc = float(row["initial_btc_balance"] or 0)
+            account_usd = float(row["account_usd_balance"] or 0)
+            account_btc = float(row["account_btc_balance"] or 0)
+            
+            # Check if account has enough balance
+            if account_usd + 1e-9 < initial_usd or account_btc + 1e-9 < initial_btc:
+                return False
+            
+            # Deduct from account
+            next_account_usd = round(account_usd - initial_usd, 8)
+            next_account_btc = round(account_btc - initial_btc, 8)
+            
+            connection.execute(
+                """
+                UPDATE paper_accounts
+                SET usd_balance = ?,
+                    btc_balance = ?,
+                    updated_at = ?
+                WHERE user_id = ?
+                """,
+                (next_account_usd, next_account_btc, timestamp, row["user_id"]),
+            )
+            
+            # Re-allocate to bot
+            connection.execute(
+                """
+                UPDATE bot_instances
+                SET usd_balance = ?,
+                    btc_balance = ?,
+                    released_usd_balance = 0,
+                    released_btc_balance = 0,
+                    released_to_account = 0,
+                    updated_at = ?
+                WHERE id = ?
+                """,
+                (initial_usd, initial_btc, timestamp, numeric_id),
+            )
+            
+            return True
 
     def list_paper_trades(self, *, user_id: str, limit: int = 250) -> list[dict[str, Any]]:
         with self._connect() as connection:

@@ -126,6 +126,11 @@ class BotProcessManager:
 
         recovered_bot_ids: list[str] = []
         for bot_id in self._paper_store.list_recoverable_bot_ids():
+            # Try to re-allocate balances if they were released
+            self._paper_store.reallocate_bot_balances(
+                bot_id=bot_id,
+                timestamp=utc_timestamp(),
+            )
             pid = self.start_bot(bot_id)
             if pid is not None:
                 recovered_bot_ids.append(bot_id)
