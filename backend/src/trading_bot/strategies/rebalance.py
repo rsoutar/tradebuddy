@@ -45,7 +45,7 @@ class RebalanceStrategy(Strategy):
         adjustment_value = target_btc_value - btc_value
         side = OrderSide.BUY if adjustment_value > 0 else OrderSide.SELL
         amount = round(abs(adjustment_value) / snapshot.price, 6)
-        price = round(snapshot.price * (0.999 if side is OrderSide.BUY else 1.001), 2)
+        price = round(snapshot.price, 2)
 
         return StrategyEvaluation(
             strategy=StrategyType.REBALANCE,
@@ -54,7 +54,7 @@ class RebalanceStrategy(Strategy):
                 OrderIntent(
                     symbol=snapshot.symbol,
                     side=side,
-                    order_type=OrderType.LIMIT,
+                    order_type=OrderType.MARKET,
                     amount=amount,
                     price=price,
                     rationale="Move allocation back toward the configured BTC target ratio.",

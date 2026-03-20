@@ -20,6 +20,7 @@ class BotWorkerRunner:
 
     def run(self) -> None:
         pid = os.getpid()
+        logger.info("Bot worker starting for %s (pid=%s)", self._bot_id, pid)
         self._app.paper_store.mark_bot_process_started(
             bot_id=self._bot_id,
             pid=pid,
@@ -27,19 +28,25 @@ class BotWorkerRunner:
         )
 
         try:
+            cycle_count = 0
             while True:
                 bot = self._app.paper_store.get_bot_instance(bot_id=self._bot_id)
                 if bot is None:
+                    logger.info("Bot %s not found, exiting", self._bot_id)
                     return
                 if bot["desiredStatus"] == "stopped":
+                    logger.info("Bot %s stopped, exiting", self._bot_id)
                     self._app.paper_store.mark_bot_stopped(
                         bot_id=self._bot_id,
                         timestamp=utc_timestamp(),
                     )
                     return
                 if bot["pid"] not in (None, pid):
+                    logger.info("Bot %s has different pid, exiting", self._bot_id)
                     return
 
+                cycle_count += 1
+                logger.debug("Bot %s cycle %d starting", self._bot_id, cycle_count)
                 cycle_result = self._app.process_bot_cycle(self._bot_id)
                 heartbeat_at = utc_timestamp()
                 self._app.paper_store.record_bot_heartbeat(
@@ -48,6 +55,7 @@ class BotWorkerRunner:
                     timestamp=heartbeat_at,
                     last_trade_at=cycle_result["lastTradeAt"],
                 )
+                logger.debug("Bot %s cycle %d completed", self._bot_id, cycle_count)
                 time.sleep(self._poll_interval_seconds)
         except Exception as exc:
             logger.exception("Bot worker crashed for %s", self._bot_id)
