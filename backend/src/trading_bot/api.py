@@ -216,6 +216,7 @@ def create_api(trading_app: Optional[TradingBotApp] = None) -> FastAPI:
             "is_fresh": is_fresh,
             "generated_at": cache.recommendation.generated_at if cache else None,
             "is_llm_generated": cache.recommendation.is_llm_generated if cache else False,
+            "recommended_strategy": cache.recommendation.recommended_strategy if cache else None,
         }
 
     @api.post("/api/bots/{bot_id}/start")

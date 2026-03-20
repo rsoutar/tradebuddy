@@ -368,7 +368,16 @@ class TradingBotApp:
 
             logging.getLogger(__name__).exception("[compare_strategies] S/R detection failed")
 
-        recommended, reason = self._recommend_strategy(snapshot, sr)
+        # Try to use cached LLM recommendation first
+        rec_cache = self._get_cached_recommendation()
+        if rec_cache and rec_cache.recommendation and rec_cache.recommendation.recommended_strategy:
+            try:
+                recommended = StrategyType(rec_cache.recommendation.recommended_strategy)
+                reason = rec_cache.recommendation.rationale or "AI Pilot recommendation based on current market conditions"
+            except ValueError:
+                recommended, reason = self._recommend_strategy(snapshot, sr)
+        else:
+            recommended, reason = self._recommend_strategy(snapshot, sr)
 
         sr_data = None
         if sr:
@@ -561,6 +570,7 @@ class TradingBotApp:
                 is_llm_generated=True,
                 headline=raw.get("headline"),
                 rationale=raw.get("rationale"),
+                recommended_strategy=raw.get("recommended_strategy"),
                 market_snapshot=asdict(snapshot),
                 grid_config=raw.get("grid"),
                 rebalance_config=raw.get("rebalance"),

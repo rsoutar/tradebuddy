@@ -20,6 +20,7 @@ class GeneratedRecommendation:
     is_llm_generated: bool
     headline: Optional[str] = None
     rationale: Optional[str] = None
+    recommended_strategy: Optional[str] = None
     market_snapshot: dict[str, Any] = field(default_factory=dict)
     grid_config: Optional[dict[str, Any]] = None
     rebalance_config: Optional[dict[str, Any]] = None
