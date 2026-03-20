@@ -31,8 +31,8 @@ Critical behavioral rules:
 - NEVER ask the user for preferences, budget, or which strategy they want. Take action immediately.
 - NEVER repeat the same tool call with the same parameters. Call once, then answer.
 - When asked "which bot" or "what strategy" or "best settings", you MUST:
-  1. Call get_market_snapshot first to get current conditions.
-  2. Call compare_strategies to evaluate all 3 strategies side-by-side.
+  1. Call get_cached_recommendation first to get the AI pilot's recommendation.
+  2. If no cached recommendation exists, call get_market_snapshot and compare_strategies to generate one.
   3. Recommend the ONE best strategy with specific parameter values based on the data.
 - Always call tools to get real data before answering quantitative questions.
 - After receiving tool results, answer the user. Do not call tools again unless the user asks a follow-up.
@@ -90,14 +90,65 @@ volume, volatility, and trend."""
             raise
 
     @agent.tool
+    async def get_cached_recommendation(ctx: RunContext[AgentDeps]) -> str:
+        """Get the AI pilot's cached recommendation for the best bot strategy. \
+This provides the same recommendation shown when creating a bot, ensuring consistency. \
+Returns headline, rationale, and strategy configurations."""
+        logger.info("[AI tool] get_cached_recommendation()")
+        try:
+            app = ctx.deps.trading_app
+            rec_cache = app._get_cached_recommendation()
+            if not rec_cache or not rec_cache.recommendation:
+                logger.info("[AI tool] No cached recommendation found")
+                return json.dumps({"has_recommendation": False, "message": "No cached recommendation available. Please use compare_strategies to generate one."})
+            
+            rec = rec_cache.recommendation
+            result = {
+                "has_recommendation": True,
+                "is_llm_generated": rec.is_llm_generated,
+                "headline": rec.headline,
+                "rationale": rec.rationale,
+                "generated_at": rec.generated_at,
+                "grid_config": rec.grid_config,
+                "rebalance_config": rec.rebalance_config,
+                "infinity_config": rec.infinity_config,
+            }
+            logger.info(
+                "[AI tool] get_cached_recommendation → headline=%s, is_llm=%s",
+                rec.headline,
+                rec.is_llm_generated,
+            )
+            return json.dumps(result, indent=2)
+        except Exception:
+            logger.exception("[AI tool] get_cached_recommendation failed")
+            raise
+
+    @agent.tool
     async def compare_strategies(ctx: RunContext[AgentDeps]) -> str:
         """Evaluate ALL three strategies (grid, rebalance, infinity-grid) with \
 auto-configured parameters based on the current market price. Returns a side-by-side \
-comparison of each strategy's proposed orders, risk, and metrics so you can recommend \
-the single best bot for current conditions. USE THIS when asked which bot/strategy to use."""
+comparison of each strategy's proposed orders, risk, and metrics. Use this to generate \
+a new comparison when no cached recommendation exists."""
         logger.info("[AI tool] compare_strategies()")
         try:
             app = ctx.deps.trading_app
+            
+            # Check if there's a cached recommendation first
+            rec_cache = app._get_cached_recommendation()
+            if rec_cache and rec_cache.recommendation:
+                rec = rec_cache.recommendation
+                logger.info("[AI tool] compare_strategies → using cached recommendation (headline=%s)", rec.headline)
+                return json.dumps({
+                    "using_cached_recommendation": True,
+                    "headline": rec.headline,
+                    "rationale": rec.rationale,
+                    "generated_at": rec.generated_at,
+                    "is_llm_generated": rec.is_llm_generated,
+                    "grid_config": rec.grid_config,
+                    "rebalance_config": rec.rebalance_config,
+                    "infinity_config": rec.infinity_config,
+                }, indent=2)
+            
             snapshot = app.market_data.get_snapshot(app.settings.runtime.symbol)
             balances = app.exchange_client.fetch_balances()
 
