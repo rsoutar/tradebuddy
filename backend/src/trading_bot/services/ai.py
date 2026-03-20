@@ -32,8 +32,10 @@ Critical behavioral rules:
 - NEVER repeat the same tool call with the same parameters. Call once, then answer.
 - When asked "which bot" or "what strategy" or "best settings", you MUST:
   1. Call get_cached_recommendation first to get the AI pilot's recommendation.
-  2. If no cached recommendation exists, call get_market_snapshot and compare_strategies to generate one.
-  3. Recommend the ONE best strategy with specific parameter values based on the data.
+  2. If a cached recommendation exists with a recommended_strategy, recommend ONLY that strategy.
+  3. Use the config for the recommended_strategy from the cached recommendation.
+  4. Do NOT recommend multiple strategies - only the one marked as recommended.
+  5. If no cached recommendation exists, call get_market_snapshot and compare_strategies to generate one.
 - Always call tools to get real data before answering quantitative questions.
 - After receiving tool results, answer the user. Do not call tools again unless the user asks a follow-up.
 - Provide specific numbers and data-backed suggestions.
@@ -93,7 +95,7 @@ volume, volatility, and trend."""
     async def get_cached_recommendation(ctx: RunContext[AgentDeps]) -> str:
         """Get the AI pilot's cached recommendation for the best bot strategy. \
 This provides the same recommendation shown when creating a bot, ensuring consistency. \
-Returns headline, rationale, and strategy configurations."""
+Returns headline, rationale, recommended strategy, and strategy configurations."""
         logger.info("[AI tool] get_cached_recommendation()")
         try:
             app = ctx.deps.trading_app
@@ -108,15 +110,17 @@ Returns headline, rationale, and strategy configurations."""
                 "is_llm_generated": rec.is_llm_generated,
                 "headline": rec.headline,
                 "rationale": rec.rationale,
+                "recommended_strategy": rec.recommended_strategy,
                 "generated_at": rec.generated_at,
                 "grid_config": rec.grid_config,
                 "rebalance_config": rec.rebalance_config,
                 "infinity_config": rec.infinity_config,
             }
             logger.info(
-                "[AI tool] get_cached_recommendation → headline=%s, is_llm=%s",
+                "[AI tool] get_cached_recommendation → headline=%s, is_llm=%s, recommended=%s",
                 rec.headline,
                 rec.is_llm_generated,
+                rec.recommended_strategy,
             )
             return json.dumps(result, indent=2)
         except Exception:
@@ -588,11 +592,14 @@ CURRENT MARKET CONDITIONS:
 SUPPORT/RESISTANCE LEVELS:
 {sr_zones}
 
-TASK: Recommend trading bot parameters for all 3 strategies. Output ONLY valid JSON like this (no markdown, no text):
+TASK: Recommend trading bot parameters for all 3 strategies AND identify the ONE best strategy for current conditions. Output ONLY valid JSON like this (no markdown, no text):
 
-{{"headline":"[brief headline]","rationale":"[2 sentences]","grid":{{"lower_price":[number],"upper_price":[number],"grid_count":[6-14],"spacing_pct":[1.2-3.4],"stop_loss_enabled":[true/false],"stop_loss_pct":[6-18]}},"rebalance":{{"target_btc_ratio":[0.35-0.65],"rebalance_threshold_pct":[2.5-8.0],"interval_minutes":[30/45/60]}},"infinity_grid":{{"reference_price":[number],"spacing_pct":[0.9-2.6],"order_size_usd":[number],"levels_per_side":[3-6]}}}}
+{{"recommended_strategy":"grid"|"rebalance"|"infinity_grid","headline":"[brief headline mentioning the recommended strategy]","rationale":"[2 sentences explaining why this strategy is best]","grid":{{"lower_price":[number],"upper_price":[number],"grid_count":[6-14],"spacing_pct":[1.2-3.4],"stop_loss_enabled":[true/false],"stop_loss_pct":[6-18]}},"rebalance":{{"target_btc_ratio":[0.35-0.65],"rebalance_threshold_pct":[2.5-8.0],"interval_minutes":[30/45/60]}},"infinity_grid":{{"reference_price":[number],"spacing_pct":[0.9-2.6],"order_size_usd":[number],"levels_per_side":[3-6]}}}}
 
 RULES:
+- recommended_strategy MUST be exactly one of: "grid", "rebalance", or "infinity_grid"
+- The headline should clearly state which strategy is recommended
+- The rationale should explain why this strategy is best for current conditions
 - lower_price should be a key S/R support below current price
 - upper_price should be a key S/R resistance above current price
 - grid_count: 6-14, higher for volatile markets
@@ -701,16 +708,23 @@ def generate_llm_recommendation(
         result = json.loads(content)
 
         # Validate required top-level keys
-        required_keys = {"headline", "rationale", "grid", "rebalance", "infinity_grid"}
+        required_keys = {"headline", "rationale", "grid", "rebalance", "infinity_grid", "recommended_strategy"}
         if not required_keys.issubset(result.keys()):
             missing = required_keys - set(result.keys())
             logger.warning("[LLMRec] LLM response missing keys: %s. Response: %s", missing, content[:200])
             return {}
 
+        # Validate recommended_strategy is one of the valid values
+        valid_strategies = {"grid", "rebalance", "infinity_grid"}
+        if result.get("recommended_strategy") not in valid_strategies:
+            logger.warning("[LLMRec] Invalid recommended_strategy: %s. Defaulting to 'grid'", result.get("recommended_strategy"))
+            result["recommended_strategy"] = "grid"
+
         logger.info(
-            "[LLMRec] Generated recommendation (price=%.2f, volatility=%.1f%%)",
+            "[LLMRec] Generated recommendation (price=%.2f, volatility=%.1f%%, recommended=%s)",
             price,
             volatility,
+            result.get("recommended_strategy"),
         )
         return result
     except Exception:
