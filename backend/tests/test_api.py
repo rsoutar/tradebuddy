@@ -508,6 +508,24 @@ def test_recommendation_cache_invalidate_endpoint(monkeypatch, tmp_path) -> None
     assert "invalidated" in payload["message"]
 
 
+def test_recommendation_cache_generate_endpoint(monkeypatch, tmp_path) -> None:
+    client = build_client(monkeypatch, tmp_path)
+
+    # Test generating cache
+    response = client.post("/api/bots/recommendations/generate")
+    assert response.status_code == 200
+    payload = response.json()
+    assert "ok" in payload
+    assert "message" in payload
+    # When AI is disabled, ok=False; when AI is enabled, ok=True
+    # The endpoint should return a proper response either way
+    if payload["ok"]:
+        assert "generated_at" in payload
+    else:
+        # AI is disabled in test environment
+        assert "Failed to generate" in payload["message"]
+
+
 def test_create_rebalance_bot_persists_custom_config(monkeypatch, tmp_path) -> None:
     client = build_client(monkeypatch, tmp_path)
 

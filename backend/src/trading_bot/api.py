@@ -219,6 +219,58 @@ def create_api(trading_app: Optional[TradingBotApp] = None) -> FastAPI:
             "recommended_strategy": cache.recommendation.recommended_strategy if cache else None,
         }
 
+    @api.get("/api/bots/recommendations/diagnostics")
+    def get_recommendation_cache_diagnostics() -> dict:
+        """Get diagnostic information about the cache store for debugging."""
+        return app_state._rec_cache.get_diagnostics()
+
+    @api.post("/api/bots/recommendations/generate")
+    def generate_recommendation_cache() -> dict:
+        """Generate and save a new recommendation cache."""
+        from trading_bot.services.recommendation_cache import RecommendationCache
+        
+        # Check if fresh cache already exists
+        if app_state._is_cache_fresh():
+            cache = app_state._get_cached_recommendation()
+            return {
+                "ok": True,
+                "message": "Fresh cache already exists",
+                "generated_at": cache.recommendation.generated_at if cache else None,
+                "is_llm_generated": cache.recommendation.is_llm_generated if cache else False,
+                "recommended_strategy": cache.recommendation.recommended_strategy if cache else None,
+            }
+        
+        # Generate new recommendation
+        snapshot = app_state.market_data.get_snapshot(app_state.settings.runtime.symbol)
+        
+        # Try to get S/R data
+        sr = None
+        try:
+            sr = app_state.sr_detector.detect(snapshot.price)
+        except Exception:
+            import logging
+            logging.getLogger(__name__).exception("[generate_recommendation_cache] S/R detection failed")
+        
+        # Generate LLM recommendation
+        rec = app_state._generate_llm_recommendation(snapshot, sr)
+        
+        if rec:
+            # Save to cache
+            app_state._rec_cache.save(RecommendationCache(recommendation=rec))
+            return {
+                "ok": True,
+                "message": "New recommendation cache generated and saved",
+                "generated_at": rec.generated_at,
+                "is_llm_generated": rec.is_llm_generated,
+                "recommended_strategy": rec.recommended_strategy,
+                "headline": rec.headline,
+            }
+        else:
+            return {
+                "ok": False,
+                "message": "Failed to generate recommendation. Check AI settings and logs.",
+            }
+
     @api.post("/api/bots/{bot_id}/start")
     def start_bot(bot_id: str, payload: BotControlRequest) -> dict:
         try:
